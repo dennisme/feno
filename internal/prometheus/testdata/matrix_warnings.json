@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "warnings": [
+    "results truncated due to limit"
+  ],
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "http_requests_total",
+          "job": "api"
+        },
+        "values": [
+          [1790812800, "1"]
+        ]
+      }
+    ]
+  }
+}
