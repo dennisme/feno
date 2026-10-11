@@ -1,0 +1,32 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "http_requests_total",
+          "instance": "a:9100",
+          "job": "api"
+        },
+        "values": [
+          [1790812800, "1"],
+          [1790812860, "2.5"],
+          [1790812920.5, "3"]
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "http_requests_total",
+          "instance": "b:9100",
+          "job": "api"
+        },
+        "values": [
+          [1790812800, "NaN"],
+          [1790812860, "+Inf"],
+          [1790812920, "-Inf"]
+        ]
+      }
+    ]
+  }
+}
