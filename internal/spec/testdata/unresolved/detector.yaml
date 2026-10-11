@@ -1,0 +1,18 @@
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-staging
+          spec:
+            query: sum(rate(http_requests_total[5m]))
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: balanced

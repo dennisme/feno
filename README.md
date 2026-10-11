@@ -16,13 +16,14 @@ piece could be tested on its own before anything was wired to a flag.
 
 | Package | What it does |
 | --- | --- |
+| `internal/spec` | Reads a directory of OpenSLO and detector YAML, resolves each detector's datasource reference, and turns a detector into a band |
 | `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together |
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
 
-Reader to band to episodes is the backtest, as a library. What is missing is
-the specification loader that would give it something to read and the command
-that would run it.
+Specification to band to episodes is the backtest, as a library. A detector
+document already loads into a `detect.Spec`. What is missing is the emitters
+that compile a band into rules and the commands that would run any of it.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.

@@ -59,6 +59,7 @@ What exists:
 | --- | --- |
 | `cmd/feno` | CLI. Command dispatch and exit codes |
 | `internal/buildinfo` | What a binary is: version, commit, build time |
+| `internal/spec` | The `AnomalyDetector` kind, the loader over a directory of mixed OpenSLO and detector documents, and validation. Imports the OpenSLO go-sdk for its kinds rather than restating them |
 | `internal/prometheus` | Range-query reader over `/api/v1/query_range`, chunked and stitched |
 | `internal/detect` | The band representation. One implementation, compiled by every target and evaluated by the backtest, because a second one makes the backtest stop predicting production |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for` |
@@ -70,7 +71,6 @@ an empty package ahead of the work that fills it:
 
 | Path | What will live there |
 | --- | --- |
-| `internal/spec` | Detector types, the mixed-document loader, validation. Imports the OpenSLO go-sdk for its kinds rather than restating them |
 | `internal/rules` | Target emitters compiling the band from `internal/detect`. Prometheus first, ClickHouse second |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together, and the report a person reads |
 
@@ -122,6 +122,7 @@ Never bypass a pre-commit hook. Do not commit unless asked to.
 ## Status
 
 `feno version` is the only command that runs. The evaluation path under
-`backtest` exists as libraries: reader, band, episodes. The README `Status`
-and `Build order` sections say what is next; keep them accurate when you land
-something they describe.
+`backtest` exists as libraries: specification loader, reader, band, episodes.
+A detector document loads into a `detect.Spec`; what is missing is the
+emitters and the commands. The README `Status` and `Build order` sections say
+what is next; keep them accurate when you land something they describe.

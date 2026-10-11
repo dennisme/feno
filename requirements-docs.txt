@@ -1,4 +1,4 @@
-# Documentation site only. The ruler itself has no Python in it, and nothing
+# Documentation site only. feno itself has no Python in it, and nothing
 # in `just check` needs these: `just docs-build` and the Pages workflow are
 # the only things that read this file.
 #
