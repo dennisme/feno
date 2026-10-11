@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: feno
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: feno
+    main: ./cmd/feno
+    binary: feno
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # Version is the only symbol worth stamping: the commit, the build time and
+    # whether the tree was dirty come from the toolchain's own vcs record, which
+    # internal/buildinfo reads back at runtime.
+    ldflags:
+      - -s -w
+      - -X github.com/dennisme/feno/internal/buildinfo.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Release notes via GitHub's generate-notes API (merged PRs with full PR URLs).
+# Commit-log backends cannot invent PR associations; github-native can.
+changelog:
+  use: github-native
+
+# No container image. feno runs to completion and writes files, so a release
+# archive and `go install` cover both the laptop and the CI runner that are the
+# only two places it runs. An image is worth adding when something wants to run
+# it as a step without a Go toolchain.

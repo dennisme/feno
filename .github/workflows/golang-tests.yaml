@@ -1,0 +1,62 @@
+name: Go Test
+
+on:
+  push:
+    tags:
+      - v*
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # Beyond the workflow's own: actions to read and write the stored coverage
+    # report, which is held as an artifact, and pull-requests to comment the
+    # delta. A fork's token is read only whatever this asks for, so the comment
+    # is refused there and octocov writes a job summary instead.
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck -show verbose ./...
+
+      - name: Build
+        run: just build
+
+      - name: Unit tests
+        run: just test
+
+      # Separate from the test step because the race detector and the coverage
+      # instrumentation are different builds, and the number reported has to
+      # come from a run that measured every package.
+      - name: Coverage
+        run: just coverage
+
+      # Configured in .octocov.yml. On main it stores the number a pull
+      # request's delta is measured against; on a pull request it reads that
+      # back and comments the difference.
+      - name: Report coverage
+        uses: k1LoW/octocov-action@v1

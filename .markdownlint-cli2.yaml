@@ -1,0 +1,6 @@
+# Globs for markdownlint-cli2 (pre-commit + local runs).
+config: .markdownlint.yaml
+globs:
+  - "**/*.md"
+ignores:
+  - "node_modules/**"

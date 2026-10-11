@@ -1,0 +1,27 @@
+# Coverage reporting. Run by the integration job, which is the only place every
+# test in the tree runs.
+
+coverage:
+  paths:
+    - coverage.out
+
+# A fork pull request's workflow token is read only, so the comment would be
+# refused. Those get the job summary below instead.
+comment:
+  if: is_pull_request && !github.event.pull_request.head.repo.fork
+  updatePrevious: true
+
+summary:
+  if: true
+
+# The number this stores on main is what a pull request's delta is measured
+# against. Held as a workflow artifact rather than a branch, so reporting
+# coverage never writes to the repository.
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+
+diff:
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}

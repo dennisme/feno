@@ -1,0 +1,7 @@
+# Documentation site only. The ruler itself has no Python in it, and nothing
+# in `just check` needs these: `just docs-build` and the Pages workflow are
+# the only things that read this file.
+#
+# Pinned exactly rather than floated. A docs build that breaks on somebody
+# else's release is a failure nobody in this repository can act on.
+mkdocs-material==9.7.7

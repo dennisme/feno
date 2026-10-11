@@ -1,0 +1,29 @@
+name: Conventional Commit Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions: read-all
+
+jobs:
+  conventional-commit-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # https://github.com/actions/runner-images/issues/12620
+      - name: Set up git references
+        run: git remote set-head origin --auto
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --hook-stage manual

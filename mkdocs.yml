@@ -1,0 +1,49 @@
+# Documentation site, published to GitHub Pages by .github/workflows/docs.yaml.
+site_name: feno
+site_description: Anomaly detector specifications compiled into alert rules, replayed before they ship.
+site_url: https://dennisme.github.io/feno/
+repo_url: https://github.com/dennisme/feno
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    # The edit link only renders when this is on, whatever edit_uri says. A
+    # page somebody can correct from the page they noticed the mistake on is
+    # the difference between a fix and a note they meant to make later.
+    - content.action.edit
+    - content.code.copy
+    - navigation.sections
+    - search.highlight
+
+markdown_extensions:
+  - attr_list
+  - tables
+  - admonition
+  - toc:
+      permalink: true
+  # Mermaid blocks, which this theme renders by loading its own copy of
+  # mermaid when it sees the class. GitHub renders the same fence natively, so
+  # a diagram in a file read there is a diagram either way.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+
+# Fail the build on a link to a page that does not exist.
+strict: true
