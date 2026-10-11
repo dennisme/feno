@@ -8,11 +8,21 @@ The name is for phenology, the study of when recurring natural events happen.
 Seasonality is the whole problem: a metric is not anomalous because it is
 high, it is anomalous because it is high for a Tuesday at 03:00.
 
-## Status: scaffold
+## Status: libraries, no commands yet
 
-Nothing is implemented. `feno version` is the only command that runs. This
-branch is the repository, the tooling and the specification, so that the first
-real commit has somewhere to land.
+`feno version` is still the only command that runs. What exists is the
+evaluation path underneath `backtest`, built from the bottom up so that each
+piece could be tested on its own before anything was wired to a flag.
+
+| Package | What it does |
+| --- | --- |
+| `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together |
+| `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
+| `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
+
+Reader to band to episodes is the backtest, as a library. What is missing is
+the specification loader that would give it something to read and the command
+that would run it.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.
@@ -63,17 +73,26 @@ underneath.
 1. Specification types, the loader, and a test proving `oslo validate` still
    passes on the OpenSLO half of a mixed directory
 2. The band representation, with an explicit model of what each target can and
-   cannot express
+   cannot express, which is `internal/detect`
 3. The Prometheus target, with golden tests against
    [grafana/promql-anomaly-detection](https://github.com/grafana/promql-anomaly-detection)
    and `promtool` in CI
-4. `backtest` over `/api/v1/query_range`, with the episode report
+4. `backtest` over `/api/v1/query_range`, with the episode report. The reader
+   and the report are in `internal/prometheus` and `internal/episode`; the
+   command itself is not written
 5. The ClickHouse target, which depends on four changes in clickhouse-ruler
 
-Prometheus is first on purpose. PromQL is the restricted dialect, with no MAD
-function and no seasonal decomposition, so building against it forces the
-capability model to be honest. ClickHouse has `seriesDecomposeSTL` and
-`seriesOutliersDetectTukey` built in and would have let that stay implicit.
+Steps 2 and 4 came before step 1 because both are pure functions over numbers
+and a time range, so they could be pinned by tests without a specification
+format to argue about first.
+
+Prometheus is first on purpose. It is the restricted dialect: `mad_over_time`
+exists but is experimental and off unless the server was started with
+`--enable-feature=promql-experimental-functions`, and there is no seasonal
+decomposition at all. Building against that forces the capability model to be
+honest about the deployment rather than the dialect. ClickHouse has
+`seriesDecomposeSTL` and `seriesOutliersDetectTukey` built in and would have
+let that stay implicit.
 
 ## Development
 
