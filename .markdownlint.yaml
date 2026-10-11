@@ -1,0 +1,18 @@
+# Markdownlint rules for the site and the repository's own markdown.
+# See https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+default: true
+
+# Long lines are common in tables, links, and code-adjacent prose.
+MD013: false
+
+# Inline HTML is used occasionally (e.g. logo centering in README).
+MD033: false
+
+# Not every file is a standalone document (PR templates, partials).
+MD041: false
+
+# Mixed compact/aligned pipe tables are fine for MkDocs.
+MD060: false
+
+# MkDocs content tabs use indented fenced blocks under `=== "…"`.
+MD046: false

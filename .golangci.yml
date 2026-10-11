@@ -1,0 +1,24 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+    - gosec
+
+  exclusions:
+    rules:
+      # Test files read fixtures from testdata and carry fake credentials in
+      # table cases. G304 and G101 fire on both and mean nothing there.
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
