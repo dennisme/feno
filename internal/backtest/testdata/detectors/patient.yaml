@@ -1,0 +1,26 @@
+# The same band with a hold duration longer than any breach in the fixtures,
+# so every run crosses the band and none of them pages anybody.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate-patient
+spec:
+  description: Checkout request volume, daily seasonal, slow to page
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  detection:
+    strategy: adaptive
+    seasonality:
+      - daily
+    class: requests
+    sensitivity: balanced
+    window: 6h
+  alerting:
+    for: 6h

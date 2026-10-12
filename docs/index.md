@@ -4,11 +4,12 @@ Anomaly detector specifications, written as OpenSLO-shaped YAML in git,
 compiled into the alert rules your stack already evaluates, and replayed over
 history before they ship.
 
-!!! warning "Status: scaffold"
+!!! warning "Status: `backtest` runs, `generate` does not"
 
-    Nothing is implemented. `feno version` is the only command that runs. See
-    the [README](https://github.com/dennisme/feno#readme) for what is being
-    built and in what order, and
+    `feno backtest -f detectors/ --url <endpoint> --from -30d` replays a
+    detector over history and prints the report. `generate` is next. See the
+    [README](https://github.com/dennisme/feno#readme) for what is being built
+    and in what order, and
     [spec.md](https://github.com/dennisme/feno/blob/main/spec.md) for why.
 
 ## The idea in one page
@@ -31,7 +32,9 @@ the output is rules a person can read at three in the morning.
 what it would have done. How many separate times it would have paged, for how
 long, which series were responsible, and how much of it coincided with an
 error budget actually burning. That report is the whole point. A detector that
-never lined up with a real incident is a detector to delete.
+never lined up with a real incident is a detector to delete. The budget
+overlap is the one number not computed yet, and the report says so rather than
+printing a zero.
 
 ## Why it is shaped this way
 

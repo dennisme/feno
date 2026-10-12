@@ -1,0 +1,29 @@
+{
+  "comment": "Three instances from one query. Two spike over the same hours and one never does, which is what the report has to tell apart: two paging episodes, overlapping for part of their length, and a third series that owes nobody an explanation.",
+  "start": "2026-09-01T00:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {"instance": "web-1"},
+      "segments": [
+        {"repeat": 81, "value": 100, "jitter": 1},
+        {"repeat": 4, "value": 140},
+        {"repeat": 18, "value": 100, "jitter": 1}
+      ]
+    },
+    {
+      "labels": {"instance": "web-2"},
+      "segments": [
+        {"repeat": 81, "value": 100, "jitter": 1},
+        {"repeat": 5, "value": 140},
+        {"repeat": 17, "value": 100, "jitter": 1}
+      ]
+    },
+    {
+      "labels": {"instance": "web-3"},
+      "segments": [
+        {"repeat": 103, "value": 100, "jitter": 1}
+      ]
+    }
+  ]
+}

@@ -251,8 +251,13 @@ func selector(level string, window, offset time.Duration) string {
 	return sel
 }
 
-// promQL is the detector's query, for this target.
-func promQL(d spec.Detector) (string, error) {
+// Query is the detector's query, for this target.
+//
+// It is exported because internal/backtest reads the same key: the backtest
+// evaluates the history behind the query the generated rule records, and two
+// packages reading two different keys out of the same metric source is a
+// backtest judging a series production never sees.
+func Query(d spec.Detector) (string, error) {
 	source, err := d.MetricSource()
 	if err != nil {
 		return "", fmt.Errorf("detector %q: %w", d.Metadata.Name, err)

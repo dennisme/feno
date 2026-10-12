@@ -30,20 +30,22 @@ func main() {
 }
 
 // run holds the dispatch so a test can drive the whole binary without a
-// process. The commands the spec describes, generate and backtest, are not
-// here yet: the usage line names what exists.
+// process. The usage line names what exists: generate is the next slice and is
+// not here yet.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printf(stderr, "%s\n", "usage: feno <version>")
+		printf(stderr, "%s\n", "usage: feno <backtest|version>")
 		return exitUsage
 	}
 
 	switch args[0] {
+	case "backtest":
+		return backtestCommand(args[1:], stdout, stderr)
 	case "version":
 		printf(stdout, "%s", buildinfo.Get())
 		return exitOK
 	default:
-		printf(stderr, "unknown command %q, want version\n", args[0])
+		printf(stderr, "unknown command %q, want backtest or version\n", args[0])
 		return exitUsage
 	}
 }
