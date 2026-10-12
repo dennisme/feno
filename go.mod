@@ -4,6 +4,7 @@ go 1.26.9
 
 require (
 	github.com/OpenSLO/go-sdk v0.9.2
+	go.yaml.in/yaml/v3 v3.0.3
 	sigs.k8s.io/yaml v1.6.0
 )
 

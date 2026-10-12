@@ -20,10 +20,11 @@ piece could be tested on its own before anything was wired to a flag.
 | `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together |
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
+| `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and refuses a band PromQL cannot express rather than approximating it |
 
-Specification to band to episodes is the backtest, as a library. A detector
-document already loads into a `detect.Spec`. What is missing is the emitters
-that compile a band into rules and the commands that would run any of it.
+Specification to band to episodes is the backtest, as a library, and
+specification to band to rules is `generate`. What is missing is the commands
+that would run either of them, and the ClickHouse target.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.

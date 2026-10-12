@@ -179,13 +179,18 @@ var margins = map[Sensitivity]float64{
 	Conservative: 4,
 }
 
+// The constants that put the two robust scales in the same units.
+//
+// They are exported because an emitter compiles the same conversion into its
+// own dialect, and a target carrying its own copy of either number is how a
+// generated rule and the backtest end up with bands of different widths.
 const (
-	// madToSigma scales a median absolute deviation to the standard deviation
+	// MADToSigma scales a median absolute deviation to the standard deviation
 	// it corresponds to on normally distributed data.
-	madToSigma = 1.4826
+	MADToSigma = 1.4826
 
-	// iqrToSigma does the same for an interquartile range, by division.
-	iqrToSigma = 1.349
+	// IQRToSigma does the same for an interquartile range, by division.
+	IQRToSigma = 1.349
 )
 
 // Requirement is an optional capability a band needs from whatever will
@@ -336,6 +341,15 @@ func (s Spec) Lookback() time.Duration {
 	return furthest + s.Window
 }
 
+// Margin is how many units of scale the band extends either side of its
+// centre, which is what [Sensitivity] resolves to.
+//
+// An emitter needs this number to compile the band and must not carry its
+// own copy of the table: a second table is a second place to change when a
+// sensitivity moves, and the two would disagree silently until somebody
+// compared a generated rule against a backtest.
+func (s Spec) Margin() float64 { return margins[s.Sensitivity] }
+
 // Requires is what this band needs from the server that will evaluate it.
 func (s Spec) Requires() []Requirement {
 	var out []Requirement
@@ -409,10 +423,10 @@ func (s Spec) band(pool []float64) Band {
 				deviations[i] = math.Abs(v - b.Centre)
 			}
 			slices.Sort(deviations)
-			b.Scale = madToSigma * quantile(0.5, deviations)
+			b.Scale = MADToSigma * quantile(0.5, deviations)
 
 		case ScaleIQR:
-			b.Scale = (quantile(0.75, sorted) - quantile(0.25, sorted)) / iqrToSigma
+			b.Scale = (quantile(0.75, sorted) - quantile(0.25, sorted)) / IQRToSigma
 		}
 	}
 

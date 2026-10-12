@@ -56,7 +56,7 @@ func TestLoadMixedDirectory(t *testing.T) {
 	if got := checkout.SourceType(); got != "Prometheus" {
 		t.Errorf("SourceType: got %q, want %q", got, "Prometheus")
 	}
-	source, err := checkout.metricSource()
+	source, err := checkout.MetricSource()
 	if err != nil {
 		t.Fatalf("metricSource: %v", err)
 	}

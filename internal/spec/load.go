@@ -74,7 +74,7 @@ func (d Detector) SourceType() string {
 	if d.DataSource != nil {
 		return d.DataSource.Spec.Type
 	}
-	source, _ := d.metricSource()
+	source, _ := d.MetricSource()
 	return source.Type
 }
 
@@ -178,7 +178,7 @@ func Load(paths ...string) (Bundle, error) {
 	}
 
 	for i := range detectors {
-		source, err := detectors[i].metricSource()
+		source, err := detectors[i].MetricSource()
 		if err != nil {
 			return Bundle{}, fmt.Errorf("%s: %w", detectors[i].File, err)
 		}

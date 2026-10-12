@@ -1,0 +1,27 @@
+# The deliberately uncompilable specification spec.md Part 9 asks for.
+#
+# A robust band pools three weekly windows, and a median of a pool is not a
+# function of the per-window medians, so PromQL cannot express it. This is
+# not a gap in the emitter: it is the degradation path, exercised while
+# Prometheus is still the only target.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-errors
+spec:
+  indicator:
+    metadata:
+      name: checkout-errors
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total{service="checkout",code=~"5.."}[5m]))
+  detection:
+    strategy: robust
+    seasonality:
+      - weekly
+    class: errors
+    sensitivity: balanced
+    window: 1h

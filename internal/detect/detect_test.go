@@ -75,14 +75,14 @@ func TestBand(t *testing.T) {
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleMAD},
 			pool:       pool,
 			wantCentre: 3,
-			wantScale:  madToSigma,
+			wantScale:  MADToSigma,
 		},
 		{
 			name:       "robust iqr is the median and the interquartile range over 1.349",
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleIQR},
 			pool:       pool,
 			wantCentre: 3,
-			wantScale:  2 / iqrToSigma,
+			wantScale:  2 / IQRToSigma,
 		},
 		{
 			name:       "a flat pool has no spread at all",
@@ -96,7 +96,7 @@ func TestBand(t *testing.T) {
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleMAD},
 			pool:       []float64{4, 1, 5, 3, 2},
 			wantCentre: 3,
-			wantScale:  madToSigma,
+			wantScale:  MADToSigma,
 		},
 	}
 
@@ -374,5 +374,25 @@ func TestValidate(t *testing.T) {
 				t.Errorf("Validate = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestMarginMatchesSensitivity keeps the exported margin and the band it
+// computes from the same table.
+func TestMarginMatchesSensitivity(t *testing.T) {
+	for _, sensitivity := range []Sensitivity{Aggressive, Balanced, Conservative} {
+		s := Spec{
+			Strategy:    Adaptive,
+			Sensitivity: sensitivity,
+			Window:      time.Hour,
+			MinSamples:  2,
+		}
+		band := s.band([]float64{1, 2, 3})
+		if band.Margin != s.Margin() {
+			t.Errorf("%s: Margin() is %v, band carries %v", sensitivity, s.Margin(), band.Margin)
+		}
+	}
+	if got := (Spec{Sensitivity: "paranoid"}).Margin(); got != 0 {
+		t.Errorf("unknown sensitivity: got %v, want 0", got)
 	}
 }
