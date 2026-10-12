@@ -1,0 +1,15 @@
+{
+  "comment": "One series, complete over the whole read span, with a four hour spike inside the reported window. Every reported instant is evaluable, so the warm-up it took to get there is the only thing being measured.",
+  "start": "2026-09-01T00:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {"instance": "web-1"},
+      "segments": [
+        {"repeat": 81, "value": 100, "jitter": 1},
+        {"repeat": 4, "value": 140},
+        {"repeat": 18, "value": 100, "jitter": 1}
+      ]
+    }
+  ]
+}

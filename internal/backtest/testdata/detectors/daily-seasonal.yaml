@@ -1,0 +1,29 @@
+# Daily seasonality over a six hour window, which at the one hour step every
+# fixture here is read at makes a lookback of three days and six hours: longer
+# than the day the fixtures report on, which is the warm-up case at a scale a
+# person can check by hand.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  description: Checkout request volume, daily seasonal
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  detection:
+    strategy: adaptive
+    seasonality:
+      - daily
+    class: requests
+    sensitivity: balanced
+    window: 6h
+  alerting:
+    for: 2h
+    runbook: https://runbooks.example.com/checkout-anomaly

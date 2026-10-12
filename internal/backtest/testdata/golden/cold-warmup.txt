@@ -1,0 +1,24 @@
+checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 samples minimum
+  query                 sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  step                  1h, for 2h
+  requires              seasonal decomposition
+  reported window       2026-09-04T06:00:00Z .. 2026-09-05T06:00:00Z  (24h, 25 instants)
+  history read          2026-09-01T00:00:00Z .. 2026-09-05T06:00:00Z  (102h, warm-up 78h)
+  read cost             1 request, 83 points, 1 series
+
+  paging episodes       0, plus 0 flaps that crossed the band without reaching for
+  series firing time    0s  (0.00% of the reported window, summed over series)
+  paged wall clock      0s  (0.00% of the reported window)
+  peak concurrent       nothing fired
+  longest episode       none
+  without a verdict     15 of 25 series-instants: 15 cold, 0 absent, 0 undefined
+  budget overlap        not computed: needs a burn-rate query per SLO, a
+                        second read, and an intersection of firing timelines
+
+  series              firing  flaps  firing time  ratio  cold  absent  undefined
+  {instance="web-1"}  0       0      0s           0.00%  15    0       0
+
+  Every ratio above divides by the reported window. Dividing by the span
+  the samples cover, or by the window times the series count, reads lower
+  and flatters the detector: the first hides a series that was missing,
+  the second shrinks every time the query matches another instance.

@@ -8,11 +8,18 @@ The name is for phenology, the study of when recurring natural events happen.
 Seasonality is the whole problem: a metric is not anomalous because it is
 high, it is anomalous because it is high for a Tuesday at 03:00.
 
-## Status: libraries, no commands yet
+## Status: `backtest` runs
 
-`feno version` is still the only command that runs. What exists is the
-evaluation path underneath `backtest`, built from the bottom up so that each
-piece could be tested on its own before anything was wired to a flag.
+`feno backtest` replays a detector over real history and prints the report.
+It needs a URL and read access, writes nothing, and exits non-zero when a
+threshold flag is exceeded, so it can gate a pull request.
+
+```bash
+feno backtest -f detectors/ --url http://mimir/prometheus --from -30d
+```
+
+`feno generate` is next and does not exist yet, though the Prometheus target
+it will use does.
 
 | Package | What it does |
 | --- | --- |
@@ -21,10 +28,11 @@ piece could be tested on its own before anything was wired to a flag.
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
 | `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and refuses a band PromQL cannot express rather than approximating it |
+| `internal/backtest` | Ties the four together: the query range a band's lookback demands, the aggregation across the series one query returns, and the report a person reads |
 
-Specification to band to episodes is the backtest, as a library, and
-specification to band to rules is `generate`. What is missing is the commands
-that would run either of them, and the ClickHouse target.
+Specification to band to episodes to report is `backtest`, and specification
+to band to rules is `generate`. What is missing is `generate` itself and the
+ClickHouse target.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.
@@ -57,7 +65,9 @@ rules a person can read while holding a pager.
 done: separate paging episodes, total firing time, the longest one, which
 series caused them, and how much of it coincided with an error budget actually
 burning. It writes nothing and needs only read access, so it is useful before
-anybody agrees to deploy anything.
+anybody agrees to deploy anything. The budget overlap is the one part not
+computed yet; the report names what it is still missing rather than printing a
+zero.
 
 ## Why the specification is OpenSLO's
 
@@ -79,10 +89,9 @@ underneath.
 3. The Prometheus target, with golden tests against
    [grafana/promql-anomaly-detection](https://github.com/grafana/promql-anomaly-detection)
    and `promtool` in CI
-4. `backtest` over `/api/v1/query_range`, with the episode report. The reader
-   and the report are in `internal/prometheus` and `internal/episode`; the
-   command itself is not written
-5. The ClickHouse target, which depends on four changes in clickhouse-ruler
+4. `backtest` over `/api/v1/query_range`, with the episode report
+5. `generate`, which is the command over `internal/rules`
+6. The ClickHouse target, which depends on four changes in clickhouse-ruler
 
 Steps 2 and 4 came before step 1 because both are pure functions over numbers
 and a time range, so they could be pinned by tests without a specification
@@ -107,6 +116,14 @@ just init     # mise tool versions and pre-commit hooks
 
 ```bash
 go run ./cmd/feno version
+go run ./cmd/feno backtest -f detectors/ --url http://localhost:9090 --from -30d
+```
+
+The tests that need a real Prometheus are behind a build tag and say what they
+want in their own skip message.
+
+```bash
+FENO_PROMETHEUS_URL=http://localhost:9090 go test -tags integration ./internal/backtest/
 ```
 
 ## License

@@ -1,0 +1,17 @@
+{
+  "comment": "One of the three preceding days ran high over the hours the band pools from, which is what separates a pooled band from an envelope of per-offset bands. The spike in the reported window sits inside the pooled band and outside the envelope. See TestPooledVersusEnvelope.",
+  "start": "2026-09-01T00:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {"instance": "web-1"},
+      "segments": [
+        {"repeat": 28, "value": 100, "jitter": 1},
+        {"repeat": 9, "value": 130},
+        {"repeat": 44, "value": 100, "jitter": 1},
+        {"repeat": 4, "value": 140},
+        {"repeat": 18, "value": 100, "jitter": 1}
+      ]
+    }
+  ]
+}

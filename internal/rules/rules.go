@@ -201,7 +201,7 @@ func Emit(target Target, step time.Duration, detectors ...spec.Detector) (Output
 		if got := d.SourceType(); got != SourceType {
 			return Output{}, fmt.Errorf("detector %q: %q: %w", d.Metadata.Name, got, ErrSourceType)
 		}
-		query, err := promQL(d)
+		query, err := Query(d)
 		if err != nil {
 			return Output{}, err
 		}

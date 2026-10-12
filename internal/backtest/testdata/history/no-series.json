@@ -1,0 +1,6 @@
+{
+  "comment": "The query matched nothing. A report of zeros here would read as a quiet detector, which is the one thing it must not say.",
+  "start": "2026-09-01T00:00:00Z",
+  "step": "1h",
+  "series": []
+}

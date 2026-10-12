@@ -1,0 +1,10 @@
+checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 samples minimum
+  query                 sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  step                  1h, for 2h
+  requires              seasonal decomposition
+  reported window       2026-09-04T06:00:00Z .. 2026-09-05T06:00:00Z  (24h, 25 instants)
+  history read          2026-09-01T00:00:00Z .. 2026-09-05T06:00:00Z  (102h, warm-up 78h)
+  read cost             1 request, 0 points, 0 series
+
+  the query returned no series over the window read, so there is no
+  verdict here: this is the absence of data rather than a quiet detector

@@ -1,0 +1,26 @@
+# Pointed at a store this reader does not speak. internal/prometheus reads
+# /api/v1/query_range and nothing else, so this is refused rather than read
+# against the wrong endpoint.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate-clickhouse
+spec:
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: ClickHouse
+          spec:
+            query: SELECT count() FROM requests
+  detection:
+    strategy: adaptive
+    seasonality:
+      - daily
+    class: requests
+    sensitivity: balanced
+    window: 6h
+  alerting:
+    for: 2h

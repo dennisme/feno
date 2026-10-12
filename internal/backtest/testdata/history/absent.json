@@ -1,0 +1,17 @@
+{
+  "comment": "A breach with one missing evaluation in the middle of it. Prometheus drops a pending alert on a single missed evaluation, so this is two runs of two samples each rather than one run of four, and at a two hour hold neither of them pages.",
+  "start": "2026-09-01T00:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {"instance": "web-1"},
+      "segments": [
+        {"repeat": 81, "value": 100, "jitter": 1},
+        {"repeat": 2, "value": 140},
+        {"repeat": 1, "absent": true},
+        {"repeat": 2, "value": 140},
+        {"repeat": 17, "value": 100, "jitter": 1}
+      ]
+    }
+  ]
+}
