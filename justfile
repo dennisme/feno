@@ -78,5 +78,17 @@ docs-build:
 release-snapshot:
     goreleaser release --snapshot --clean
 
+# Check every generated rule file with promtool.
+#
+# Not part of `check` yet, because promtool is not in .tool-versions and a
+# recipe that fails on a tool nobody was asked to install is worse than one
+# that has to be run on purpose. The Go test skips with the same message, so
+# an absent promtool is visible rather than silent. spec.md Part 9 counts on
+# this being free verification, so it belongs in `check` as soon as the tool
+# is pinned.
+promtool:
+    command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; add it to .tool-versions"; exit 1; }
+    promtool check rules internal/rules/testdata/golden/*.yml
+
 # Everything CI runs, in the order CI runs it.
 check: lint build test markdownlint

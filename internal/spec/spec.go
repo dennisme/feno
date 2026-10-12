@@ -237,7 +237,7 @@ func (d AnomalyDetector) Validate() error {
 		return ErrName
 	}
 
-	source, err := d.metricSource()
+	source, err := d.MetricSource()
 	if err != nil {
 		return err
 	}
@@ -283,8 +283,13 @@ func (d AnomalyDetector) Validate() error {
 	return nil
 }
 
-// metricSource is the one metric source a detector watches.
-func (d AnomalyDetector) metricSource() (v1.SLIMetricSource, error) {
+// MetricSource is the one metric source a detector watches.
+//
+// It is exported because each target reads a different thing out of it: the
+// Spec map is OpenSLO's per-type extension point, so the key holding a
+// PromQL query is not the key holding a ClickHouse one, and an accessor per
+// target here would mean this package knowing every dialect.
+func (d AnomalyDetector) MetricSource() (v1.SLIMetricSource, error) {
 	sli := d.Spec.Indicator.Spec
 	if sli.ThresholdMetric == nil || sli.RatioMetric != nil {
 		return v1.SLIMetricSource{}, ErrIndicator

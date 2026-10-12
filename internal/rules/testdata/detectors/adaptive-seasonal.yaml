@@ -1,0 +1,27 @@
+# Daily and weekly pooled, which is six windows, plus an absolute floor on
+# the band's width.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-latency
+spec:
+  indicator:
+    metadata:
+      name: checkout-latency
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service="checkout"}[5m])) by (le))
+  detection:
+    strategy: adaptive
+    seasonality:
+      - daily
+      - weekly
+    class: latency
+    sensitivity: conservative
+    window: 1h
+    minWidth: 0.05
+  alerting:
+    for: 15m

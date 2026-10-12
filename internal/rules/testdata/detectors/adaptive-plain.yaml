@@ -1,0 +1,23 @@
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  description: Checkout request volume
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m]))
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: balanced
+    window: 1h
+  alerting:
+    for: 10m
+    runbook: https://runbooks.example.com/checkout-anomaly

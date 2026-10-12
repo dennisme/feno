@@ -1,0 +1,24 @@
+# Asks for mad_over_time, which exists only where the server was started
+# with promql-experimental-functions. Compiles two ways on purpose.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: queue-depth
+spec:
+  indicator:
+    metadata:
+      name: annotator-lag
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(kafka_consumergroup_lag{consumergroup="annotator"})
+  detection:
+    strategy: robust
+    robustScale: mad
+    class: saturation
+    sensitivity: aggressive
+    window: 30m
+  alerting:
+    for: 5m
