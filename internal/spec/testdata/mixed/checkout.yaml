@@ -1,0 +1,50 @@
+# An SLI and a detector over the same series, in one file. The SLI half is
+# go-sdk's business and this file is what TestOpenSLOHalfStillValidates reads.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-availability
+spec:
+  description: X% of checkout requests are successful
+  thresholdMetric:
+    metricSource:
+      metricSourceRef: mimir-prod
+      type: Prometheus
+      spec:
+        query: sum(rate(http_requests_total{service="checkout",code!~"5.."}[5m]))
+---
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+  labels:
+    service: checkout
+    owner:
+      - payments-team
+spec:
+  description: Checkout request volume, weekly seasonal
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: |
+              sum(rate(http_requests_total{service="checkout"}[5m]))
+              ---
+              # the line above is inside a block scalar and is not a
+              # document separator. The splitter has to agree.
+  detection:
+    strategy: robust
+    seasonality:
+      - daily
+      - weekly
+    class: requests
+    sensitivity: conservative
+    window: 1h
+    minWidth: 0.5
+  alerting:
+    for: 10m
+    runbook: https://runbooks.example.com/checkout-anomaly

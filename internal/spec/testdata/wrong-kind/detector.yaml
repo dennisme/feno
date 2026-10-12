@@ -1,0 +1,5 @@
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetectors
+metadata:
+  name: checkout-request-rate
+spec: {}
