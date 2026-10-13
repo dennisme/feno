@@ -28,9 +28,9 @@ func TestRun(t *testing.T) {
 		},
 		{
 			name:     "an unknown command names what it wanted",
-			args:     []string{"generate"},
+			args:     []string{"serve"},
 			want:     exitUsage,
-			inStderr: `unknown command "generate"`,
+			inStderr: `unknown command "serve"`,
 		},
 	}
 

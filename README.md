@@ -8,7 +8,7 @@ The name is for phenology, the study of when recurring natural events happen.
 Seasonality is the whole problem: a metric is not anomalous because it is
 high, it is anomalous because it is high for a Tuesday at 03:00.
 
-## Status: `backtest` runs
+## Status: both commands run against Prometheus
 
 `feno backtest` replays a detector over real history and prints the report.
 It needs a URL and read access, writes nothing, and exits non-zero when a
@@ -18,8 +18,16 @@ threshold flag is exceeded, so it can gate a pull request.
 feno backtest -f detectors/ --url http://mimir/prometheus --from -30d
 ```
 
-`feno generate` is next and does not exist yet, though the Prometheus target
-it will use does.
+`feno generate` compiles each specification into a rule file, one file per
+specification, carrying a provenance header naming the tool version, the
+specification and a hash of it. `--check` writes nothing and fails when the
+committed files are not what the specifications compile to, which is the
+drift gate a pull request runs offline.
+
+```bash
+feno generate -f detectors/ -o rules/anomaly/
+feno generate -f detectors/ -o rules/anomaly/ --check
+```
 
 | Package | What it does |
 | --- | --- |
@@ -31,8 +39,7 @@ it will use does.
 | `internal/backtest` | Ties the four together: the query range a band's lookback demands, the aggregation across the series one query returns, and the report a person reads |
 
 Specification to band to episodes to report is `backtest`, and specification
-to band to rules is `generate`. What is missing is `generate` itself and the
-ClickHouse target.
+to band to rules is `generate`. What is missing is the ClickHouse target.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.

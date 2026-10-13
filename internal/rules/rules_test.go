@@ -37,6 +37,18 @@ func load(t *testing.T, dir string, names ...string) []spec.Detector {
 	return bundle.Detectors
 }
 
+// source is the provenance a generated file carries: the fixture path and
+// the bytes behind it, read the same way the command reads them.
+func source(t *testing.T, dir, name string) Source {
+	t.Helper()
+	path := filepath.Join("testdata", dir, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return Source{Path: path, Specification: data}
+}
+
 func golden(t *testing.T, name string, got []byte) {
 	t.Helper()
 	path := filepath.Join("testdata", "golden", name)
@@ -91,7 +103,7 @@ func TestGolden(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			detectors := load(t, "detectors", tt.fixture)
-			out, err := Emit(tt.target, step, detectors...)
+			out, err := Emit(tt.target, step, source(t, "detectors", tt.fixture), detectors...)
 			if err != nil {
 				t.Fatalf("Emit: %v", err)
 			}
@@ -116,7 +128,7 @@ func TestGolden(t *testing.T) {
 // weaker form of this band to emit.
 func TestUncompilable(t *testing.T) {
 	detectors := load(t, "uncompilable", "robust-seasonal.yaml")
-	_, err := Emit(Target{ExperimentalFunctions: true}, step, detectors...)
+	_, err := Emit(Target{ExperimentalFunctions: true}, step, Source{}, detectors...)
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("got %v, want %v", err, ErrUnsupported)
 	}
@@ -187,7 +199,7 @@ func TestWindowBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Band: %v", err)
 	}
-	out, err := Emit(Target{}, step, detectors...)
+	out, err := Emit(Target{}, step, Source{}, detectors...)
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
@@ -278,7 +290,7 @@ func TestEmitErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Emit(Target{}, step, tt.detectors...)
+			_, err := Emit(Target{}, step, Source{}, tt.detectors...)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("got %v, want %v", err, tt.want)
 			}
