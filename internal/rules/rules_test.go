@@ -344,7 +344,13 @@ func TestPromtool(t *testing.T) {
 	}
 	for _, file := range files {
 		t.Run(filepath.Base(file), func(t *testing.T) {
-			out, err := exec.Command(path, "check", "rules", file).CombinedOutput()
+			// The experimental functions are enabled because that is the
+			// server these files were compiled for: mad_over_time is only
+			// emitted when the target declares it, and a check without the
+			// feature would reject the file for the one reason the
+			// compiler already accounted for.
+			out, err := exec.Command(path, "check", "rules",
+				"--enable-feature=promql-experimental-functions", file).CombinedOutput()
 			if err != nil {
 				t.Errorf("promtool rejected %s: %v\n%s", file, err, out)
 			}
