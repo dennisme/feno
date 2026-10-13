@@ -15,7 +15,7 @@ import (
 // repository has nowhere to run a Prometheus; what is left here is the flag
 // handling, and a flag parsed wrongly is a report of the wrong window.
 func TestBacktestFlags(t *testing.T) {
-	const detectors = "testdata/checkout.yaml"
+	const detectors = "testdata/detectors/checkout.yaml"
 
 	tests := []struct {
 		name     string

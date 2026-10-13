@@ -1,0 +1,22 @@
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: api-latency
+spec:
+  indicator:
+    metadata:
+      name: api-latency
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+  detection:
+    strategy: robust
+    robustScale: mad
+    class: latency
+    sensitivity: balanced
+    window: 2h
+  alerting:
+    for: 10m

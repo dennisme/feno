@@ -4,10 +4,12 @@ Anomaly detector specifications, written as OpenSLO-shaped YAML in git,
 compiled into the alert rules your stack already evaluates, and replayed over
 history before they ship.
 
-!!! warning "Status: `backtest` runs, `generate` does not"
+!!! warning "Status: both commands run against Prometheus"
 
     `feno backtest -f detectors/ --url <endpoint> --from -30d` replays a
-    detector over history and prints the report. `generate` is next. See the
+    detector over history and prints the report, and `feno generate -f
+    detectors/ -o rules/anomaly/` compiles the rule files, with `--check` as
+    the drift gate. The ClickHouse target is next. See the
     [README](https://github.com/dennisme/feno#readme) for what is being built
     and in what order, and
     [spec.md](https://github.com/dennisme/feno/blob/main/spec.md) for why.

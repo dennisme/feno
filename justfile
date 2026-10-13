@@ -89,6 +89,10 @@ release-snapshot:
 promtool:
     command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; add it to .tool-versions"; exit 1; }
     promtool check rules internal/rules/testdata/golden/*.yml
+    out=$(mktemp -d); \
+    go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" >/dev/null; \
+    promtool check rules "$out"/*.yaml; \
+    rm -rf "$out"
 
 # Everything CI runs, in the order CI runs it.
 check: lint build test markdownlint
