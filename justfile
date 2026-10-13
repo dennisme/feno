@@ -88,10 +88,10 @@ release-snapshot:
 # is pinned.
 promtool:
     command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; add it to .tool-versions"; exit 1; }
-    promtool check rules internal/rules/testdata/golden/*.yml
+    promtool check rules --enable-feature=promql-experimental-functions internal/rules/testdata/golden/*.yml
     out=$(mktemp -d); \
-    go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" >/dev/null; \
-    promtool check rules "$out"/*.yaml; \
+    go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" --experimental-functions >/dev/null; \
+    promtool check rules --enable-feature=promql-experimental-functions "$out"/*.yaml; \
     rm -rf "$out"
 
 # Everything CI runs, in the order CI runs it.
