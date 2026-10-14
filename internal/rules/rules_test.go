@@ -326,13 +326,13 @@ func TestPromDuration(t *testing.T) {
 }
 
 // TestPromtool is the free verification spec.md Part 9 counts on. It runs
-// the real binary over every golden file and asserts nothing of its own, so
-// it skips rather than passing when promtool is absent: `promtool` is not in
-// .tool-versions, and installing a tool is not this test's decision.
+// the real binary over every golden file and asserts nothing of its own. It
+// skips when promtool is absent, because `just check` and CI run the pinned
+// one and a contributor reading the tests should not need it to run them.
 func TestPromtool(t *testing.T) {
 	path, err := exec.LookPath("promtool")
 	if err != nil {
-		t.Skip("promtool not installed and not in .tool-versions; `just check` cannot verify the generated rules")
+		t.Skip("promtool not installed; `just init` installs the pinned version")
 	}
 
 	files, err := filepath.Glob(filepath.Join("testdata", "golden", "*.yml"))

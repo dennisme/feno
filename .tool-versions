@@ -2,3 +2,7 @@ golangci-lint 2.12.2
 pre-commit    4.5.1
 golang        1.26.8
 goreleaser    2.18.2
+# Moves with the prom/prometheus image in smoketest/compose.yaml. One release
+# decides both answers: what promtool accepts in a generated rule file, and
+# whether the plain server still refuses mad_over_time.
+promtool      3.15.0

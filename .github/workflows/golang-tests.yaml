@@ -32,6 +32,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Only promtool, because setup-go already provided the toolchain and the
+      # rest of .tool-versions belongs to recipes this job does not run. The
+      # pin is what matters: the promtool that checks the generated rules here
+      # is the one a contributor gets from `just init`.
+      - name: Install pinned promtool
+        uses: jdx/mise-action@v5
+        with:
+          install_args: promtool
+
       - name: Install dependencies
         run: go mod download
 
@@ -49,6 +58,9 @@ jobs:
       - name: Unit tests
         run: just test
 
+      - name: Check generated rules
+        run: just promtool
+
       # Separate from the test step because the race detector and the coverage
       # instrumentation are different builds, and the number reported has to
       # come from a run that measured every package.
@@ -60,3 +72,25 @@ jobs:
       # back and comments the difference.
       - name: Report coverage
         uses: k1LoW/octocov-action@v1
+
+  # Its own job because what it proves is not a unit: two Prometheus servers
+  # come up, and one that will not should read as that rather than as a failing
+  # test. It needs no secrets and pulls public images, so it runs on a fork
+  # pull request as well as on main.
+  smoketest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Probe two real Prometheus servers
+        run: just smoketest

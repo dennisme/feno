@@ -8,12 +8,15 @@
 #
 # The version is pinned because the answer being tested is a property of a
 # release: mad_over_time has been behind the flag since 2.49.0 and is still
-# behind it in 3.14.0, and the day it is promoted the plain server starts
+# behind it in 3.15.0, and the day it is promoted the plain server starts
 # answering the probe. That is a change feno wants to find out about from a
 # failing smoketest rather than from a rule that quietly changed shape.
+#
+# It moves with the promtool pin in .tool-versions, so the server the probe is
+# read against and the promtool that checks the emitted rules are one release.
 services:
   plain:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.0
     ports:
       - "19090:9090"
     command:
@@ -26,7 +29,7 @@ services:
       retries: 30
 
   experimental:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.0
     ports:
       - "19091:9090"
     command:
