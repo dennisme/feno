@@ -1,0 +1,5 @@
+targets:
+  - engine: prometheus
+    output: rules/anomaly/
+  - engine: prometheus
+    output: rules/other/

@@ -436,3 +436,41 @@ func TestQueryServerError(t *testing.T) {
 		t.Errorf("error %q does not quote what the server said", err)
 	}
 }
+
+// TestUnreachable separates the server that was never spoken to from the
+// server that answered and said no. The gate a backtest runs in CI skips on
+// the first and fails on the second, so classifying one as the other is a
+// budget that stops being enforced or a broken query that stops being
+// reported.
+func TestUnreachable(t *testing.T) {
+	// A server that existed and does not now, which is what a runner with no
+	// network path to production meets: a real refused connection rather than
+	// a fixture of one.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	client, err := New(srv.URL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	srv.Close()
+
+	_, err = client.QueryRange(context.Background(), "up", at(0), at(10), step)
+	if err == nil {
+		t.Fatal("QueryRange against a closed server returned no error")
+	}
+	if !Unreachable(err) {
+		t.Errorf("Unreachable(%v) = false, want true", err)
+	}
+
+	rejected, _ := serve(t, http.StatusBadRequest, "error_unknown_function.json")
+	_, err = rejected.QueryRange(context.Background(), "mad_over_time(up[1m])", at(0), at(10), step)
+	if !errors.Is(err, ErrQuery) {
+		t.Fatalf("got error %v, want %v", err, ErrQuery)
+	}
+	if Unreachable(err) {
+		t.Errorf("Unreachable(%v) = true, want false: the server answered", err)
+	}
+
+	if Unreachable(nil) {
+		t.Error("Unreachable(nil) = true")
+	}
+}

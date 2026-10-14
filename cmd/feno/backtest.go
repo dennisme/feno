@@ -12,6 +12,7 @@ import (
 	v1 "github.com/OpenSLO/go-sdk/pkg/openslo/v1"
 
 	"github.com/dennisme/feno/internal/backtest"
+	"github.com/dennisme/feno/internal/config"
 	"github.com/dennisme/feno/internal/prometheus"
 	"github.com/dennisme/feno/internal/spec"
 )
@@ -36,8 +37,7 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		step       = fs.Duration("step", defaultStep, "query resolution, and the evaluation interval the report predicts")
 		only       = fs.String("detector", "", "report on one detector by name rather than every one loaded")
 		maxPoints  = fs.Int("max-points", 0, "the server's points-per-series limit, if it is lower than Prometheus' 11000")
-		maxEpisode = fs.Int("max-episodes", -1, "fail if a detector would have paged more than this many times")
-		maxRatio   = fs.Float64("max-firing-ratio", -1, "fail if a detector would have been firing for more than this fraction of the window")
+		configPath = fs.String("config", "", "the "+config.Filename+" holding the noise budget; found by walking up from the specifications when unset")
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
 	fs.Var(&headers, "header", "a header to send with every request, as name=value; repeatable")
@@ -80,6 +80,15 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
+	settings, err := loadConfig(*configPath, paths[0])
+	if err != nil {
+		printf(stderr, "%s\n", err)
+		return exitUsage
+	}
+	if settings.Path == "" {
+		printf(stderr, "no %s found above %s: no noise budget is enforced\n", config.Filename, paths[0])
+	}
+
 	client, err := prometheus.New(*url)
 	if err != nil {
 		printf(stderr, "%s\n", err)
@@ -89,7 +98,6 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 	client.MaxPointsPerSeries = *maxPoints
 
 	options := backtest.Options{From: start, To: end, Step: *step}
-	thresholds := backtest.Thresholds{MaxEpisodes: *maxEpisode, MaxFiringRatio: *maxRatio}
 
 	var (
 		reported int
@@ -102,6 +110,15 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 
 		report, err := backtest.Run(context.Background(), client, detector, options)
 		if err != nil {
+			// The gate degrades here rather than failing: a runner that
+			// cannot reach a datasource has not found a noisy detector, it
+			// has found out it cannot look.
+			if prometheus.Unreachable(err) {
+				printf(stderr, "backtest skipped: %s is not reachable: %s\n", *url, err)
+				printf(stderr, "%s; the offline gates, feno generate --check and promtool check rules, still block\n",
+					unchecked(settings))
+				return exitSkipped
+			}
 			printf(stderr, "%s\n", err)
 			return exitUsage
 		}
@@ -113,7 +130,7 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 			return exitUsage
 		}
 		reported++
-		findings = append(findings, report.Exceeded(thresholds)...)
+		findings = append(findings, report.Exceeded(thresholds(settings.Budget.For(detector.Metadata.Name)))...)
 	}
 
 	if reported == 0 {
@@ -127,6 +144,47 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		return exitFinding
 	}
 	return exitOK
+}
+
+// loadConfig reads the feno.yaml holding the repository's targets and its
+// noise budget.
+//
+// A path given by flag has to be there, because somebody named it. Without
+// one the walk starts at the first specification path, so the budget beside
+// the specifications is found from wherever in the repository the command was
+// run, and a repository that has no budget comes back as a file with no path
+// rather than as an error.
+func loadConfig(flagPath, specPath string) (config.File, error) {
+	if flagPath != "" {
+		return config.Load(flagPath)
+	}
+	found, ok := config.Find(specPath)
+	if !ok {
+		return config.File{}, nil
+	}
+	return config.Load(found)
+}
+
+// unchecked says what a skipped run did not check, which is either a budget
+// somebody wrote or the absence of one.
+func unchecked(file config.File) string {
+	if file.Path == "" {
+		return "no noise budget was found, so none was checked"
+	}
+	return "the noise budget in " + file.Path + " was not checked"
+}
+
+// thresholds is the loaded limits in the form the report compares against,
+// where an unset limit is a negative number rather than a nil pointer.
+func thresholds(limits config.Limits) backtest.Thresholds {
+	out := backtest.NoThresholds
+	if limits.MaxEpisodes != nil {
+		out.MaxEpisodes = *limits.MaxEpisodes
+	}
+	if limits.MaxFiringRatio != nil {
+		out.MaxFiringRatio = *limits.MaxFiringRatio
+	}
+	return out
 }
 
 // timestamp reads a flag that is either an RFC 3339 instant or a duration
