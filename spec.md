@@ -1101,10 +1101,33 @@ how operations launched a process.
 ### Probing, and the fallback
 
 feno probes once per target at generate time. Issue `mad_over_time(up[1m])`
-against the instant query endpoint and read whether the answer is an
-unknown-function error. Cache the result for the run, and name which form was
+against the instant query endpoint and read whether the answer is a rejection
+naming the function. Cache the result for the run, and name which form was
 chosen in the generated file's provenance header, so a rule that changed shape
 between two runs explains itself.
+
+Two rejections mean the function cannot be used, and they are not the same
+sentence, because the PromQL parser reaches them by different branches. A
+server that carries the function behind the feature flag knows the name and
+answers `function "mad_over_time" is not enabled`. A parser that never had the
+function answers `unknown function with name "mad_over_time"`, which is what a
+Thanos, a VictoriaMetrics or a Mimir behind the upstream function list gives.
+Reading only the second one, which is what the first implementation did, reads
+a flagged-off Prometheus as a server to fail against rather than one to compile
+the fallback for.
+
+Any other answer is a failure and exits non-zero rather than falling back. A
+band that changed shape because a proxy returned 503 is the exact thing the
+provenance header exists to make visible, so the probe must not be able to
+degrade quietly. That is also why the specific rejections are read rather than
+any 400: the same status covers a query over too many series or a range past a
+configured limit.
+
+Both sentences belong to a release of somebody else's parser, so a fixture of
+either is evidence of nothing but itself. `just smoketest` runs the probe
+against two pinned Prometheus containers, one started with the flag and one
+without, which is what makes the reading above a checked claim and what will
+turn red on the day the function is promoted.
 
 Both forms are emitted from one band representation:
 
