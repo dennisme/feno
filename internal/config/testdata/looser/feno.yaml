@@ -1,0 +1,5 @@
+budget:
+  maxEpisodes: 4
+  detectors:
+    chatty-detector:
+      maxEpisodes: 12

@@ -7,7 +7,7 @@ budget:
   maxFiringRatio: 0.02
   detectors:
     checkout-request-rate:
-      maxEpisodes: 12
+      maxEpisodes: 2
     quiet-detector:
       maxEpisodes: 0
       maxFiringRatio: 0

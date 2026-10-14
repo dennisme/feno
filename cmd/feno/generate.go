@@ -66,7 +66,7 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	settings, err := loadConfig(*configPath, paths[0])
+	settings, err := declaredTarget(*configPath, paths)
 	if err != nil {
 		printf(stderr, "%s\n", err)
 		return exitUsage
@@ -117,19 +117,36 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 // working directory. The file describes a repository's layout, and a command
 // is run from wherever somebody happens to be standing, so the two have to be
 // anchored to the file that made the claim.
-func output(flagPath, engine string, settings config.File) (string, error) {
+func output(flagPath, engine string, settings *config.File) (string, error) {
 	if flagPath != "" {
 		return flagPath, nil
 	}
+	if settings == nil {
+		return "", fmt.Errorf("no -o and no %s under the specifications: one of the two has to say where the rules go",
+			config.Filename)
+	}
 	target, ok := settings.Target(engine)
 	if !ok {
-		if settings.Path == "" {
-			return "", fmt.Errorf("no -o and no %s above the specifications: one of the two has to say where the rules go",
-				config.Filename)
-		}
 		return "", fmt.Errorf("no -o, and %s declares no target for %q", settings.Path, engine)
 	}
 	return filepath.Join(filepath.Dir(settings.Path), target.Output), nil
+}
+
+// declaredTarget is the feno.yaml that answers for the whole run: the one
+// named by flag, or the one nearest the specifications.
+//
+// One file rather than one per detector, because a run writes one output
+// directory. A repository that wants a directory per team runs generate per
+// team, the same way it owns a budget per team.
+func declaredTarget(flagPath string, paths []string) (*config.File, error) {
+	if flagPath != "" {
+		file, err := config.Load(flagPath)
+		if err != nil {
+			return nil, err
+		}
+		return &file, nil
+	}
+	return config.NewScope(paths...).Nearest(paths[0])
 }
 
 // given reports whether a flag was named on the command line, which is the

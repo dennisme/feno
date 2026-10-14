@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/OpenSLO/go-sdk/pkg/openslo/v1"
+
 	"github.com/dennisme/feno/internal/backtest"
 	"github.com/dennisme/feno/internal/config"
+	"github.com/dennisme/feno/internal/spec"
 )
 
 // TestBacktestFlags covers every way the command refuses to run.
@@ -237,8 +240,10 @@ func TestBacktestSkipsUnreachableDatasource(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// -f names the tree rather than the leaf, which is how a budget above
+	// the specifications is asked for: the walk stops where -f points.
 	var stdout, stderr bytes.Buffer
-	got := run([]string{"backtest", "-f", specs, "--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
+	got := run([]string{"backtest", "-f", root, "--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
 
 	if got != exitSkipped {
 		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
@@ -308,6 +313,86 @@ func TestThresholds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := thresholds(tt.limits); got != tt.want {
 				t.Errorf("thresholds = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBudgetPerDetector is the monorepo in one invocation: two teams, a
+// budget each, a ceiling above both, and every detector held to the strictest
+// limit on its own path rather than to whichever file the run happened to
+// find first.
+func TestBudgetPerDetector(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(config.Filename, "budget:\n  maxEpisodes: 4\n  maxFiringRatio: 0.05\n")
+	write(filepath.Join("teams", "checkout", config.Filename), "budget:\n  maxEpisodes: 2\n")
+	write(filepath.Join("teams", "search", config.Filename), "budget:\n  maxFiringRatio: 0.01\n")
+
+	budget, err := newBudget("", []string{root})
+	if err != nil {
+		t.Fatalf("newBudget: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		file     string
+		detector string
+		want     backtest.Thresholds
+	}{
+		{
+			// The team is stricter on episodes and silent on the ratio.
+			name:     "a checkout detector",
+			file:     filepath.Join("teams", "checkout", "detectors", "checkout.yaml"),
+			detector: "checkout-request-rate",
+			want:     backtest.Thresholds{MaxEpisodes: 2, MaxFiringRatio: 0.05},
+		},
+		{
+			name:     "a search detector",
+			file:     filepath.Join("teams", "search", "detectors", "search.yaml"),
+			detector: "search-latency",
+			want:     backtest.Thresholds{MaxEpisodes: 4, MaxFiringRatio: 0.01},
+		},
+		{
+			// No team file above it, so the ceiling is the whole budget.
+			name:     "a detector no team owns",
+			file:     filepath.Join("shared", "up.yaml"),
+			detector: "target-down",
+			want:     backtest.Thresholds{MaxEpisodes: 4, MaxFiringRatio: 0.05},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detector := spec.Detector{
+				AnomalyDetector: spec.AnomalyDetector{
+					Metadata: v1.Metadata{Name: tt.detector},
+				},
+				File: filepath.Join(root, tt.file),
+			}
+
+			limits, err := budget.limits(detector)
+			if err != nil {
+				t.Fatalf("limits: %v", err)
+			}
+			got := thresholds(limits)
+			if got.MaxEpisodes != tt.want.MaxEpisodes || got.MaxFiringRatio != tt.want.MaxFiringRatio {
+				t.Errorf("thresholds = %d episodes, %v ratio; want %d, %v",
+					got.MaxEpisodes, got.MaxFiringRatio, tt.want.MaxEpisodes, tt.want.MaxFiringRatio)
+			}
+			// The file that set each limit is what a finding names.
+			if got.EpisodesFrom == "" || got.RatioFrom == "" {
+				t.Errorf("thresholds = %+v, want both limits to name a file", got)
 			}
 		})
 	}

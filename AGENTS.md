@@ -63,8 +63,10 @@ exits 3, which is a check that did not run rather than one that passed.
 Go's own parser has no unit for either.
 
 The budget is a file and not a flag, and `internal/config` holds the reason at
-length. `feno.yaml` is found by walking up from the specifications, or named
-with `-config`.
+length. Each detector is held to the strictest limit in the files from the
+`-f` path down to its own directory, so a team may tighten what the repository
+set and may not loosen it. A finding names the file that set the limit it
+broke. `-config` names one file and replaces the walk.
 
 The tests that need a real Prometheus are behind the `integration` tag and
 skip with a message naming the environment variables they want.
@@ -81,12 +83,12 @@ What exists:
 | --- | --- |
 | `cmd/feno` | CLI. Command dispatch and exit codes |
 | `internal/buildinfo` | What a binary is: version, commit, build time |
-| `internal/spec` | The `AnomalyDetector` kind, the loader over a directory of mixed OpenSLO and detector documents, and validation. Imports the OpenSLO go-sdk for its kinds rather than restating them |
+| `internal/spec` | The `AnomalyDetector` kind, the loader over a walked tree of mixed OpenSLO and detector documents, and validation. Imports the OpenSLO go-sdk for its kinds rather than restating them |
 | `internal/prometheus` | Range-query reader over `/api/v1/query_range`, chunked and stitched |
 | `internal/detect` | The band representation. One implementation, compiled by every target and evaluated by the backtest, because a second one makes the backtest stop predicting production |
 | `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, and declares what the target cannot express |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for` |
-| `internal/config` | `feno.yaml`: the repository's targets and its noise budget, found by walking up from the specifications. A limit is a pointer, because zero is a budget somebody means |
+| `internal/config` | `feno.yaml`: the repository's targets and its noise budget, resolved per detector from the files above it with the stricter limit binding. A limit is a pointer, because zero is a budget somebody means |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the aggregation across one query's series, and the report a person reads |
 | `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |
 | `history/` | A Prometheus over a generated month of TSDB blocks, for the backtest's read against a range past the resolution limit |

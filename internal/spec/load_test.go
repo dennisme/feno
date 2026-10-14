@@ -5,12 +5,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/OpenSLO/go-sdk/pkg/openslo"
 	v1 "github.com/OpenSLO/go-sdk/pkg/openslo/v1"
 	"github.com/OpenSLO/go-sdk/pkg/openslosdk"
+
+	"github.com/dennisme/feno/internal/config"
 )
 
 func TestLoadMixedDirectory(t *testing.T) {
@@ -283,4 +286,55 @@ func TestDetectorAPIVersionIsNotOpenSLOs(t *testing.T) {
 	if err := openslo.Version(APIVersion).Validate(); err == nil {
 		t.Errorf("go-sdk accepts %q as one of its own versions", APIVersion)
 	}
+}
+
+// TestLoadWalksNestedDirectories is the monorepo: specifications nested by
+// team, loaded by pointing at the tree that holds them rather than at every
+// leaf. A file that is not YAML is passed over, and the order is the walk's
+// so an error names the same file every run.
+func TestLoadWalksNestedDirectories(t *testing.T) {
+	bundle, err := Load(filepath.Join("testdata", "nested"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	names := make([]string, 0, len(bundle.Detectors))
+	for _, d := range bundle.Detectors {
+		names = append(names, d.Metadata.Name)
+	}
+	slices.Sort(names)
+	want := []string{"checkout-depth", "search-depth"}
+	if !slices.Equal(names, want) {
+		t.Errorf("detectors = %v, want %v", names, want)
+	}
+
+	// feno.yaml is the noise budget, and a walked tree holds one. It is not
+	// a specification and refusing it as an unknown kind would make a
+	// repository that has a budget unable to load at all.
+	for _, file := range mustCollect(t, filepath.Join("testdata", "nested")) {
+		if filepath.Base(file) == config.Filename {
+			t.Errorf("%s was collected as a specification", file)
+		}
+	}
+
+	// The DataSource at the top of the tree and a detector three levels down
+	// are one set, which is what makes a reference across them resolve.
+	if len(bundle.Objects) == 0 {
+		t.Error("the OpenSLO half of the tree was not loaded")
+	}
+
+	for _, d := range bundle.Detectors {
+		if filepath.Dir(d.File) == filepath.Join("testdata", "nested") {
+			t.Errorf("%s: detector came from the top of the tree, want a nested file", d.File)
+		}
+	}
+}
+
+func mustCollect(t *testing.T, paths ...string) []string {
+	t.Helper()
+	files, err := collect(paths)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	return files
 }

@@ -359,8 +359,10 @@ func TestGenerateOutputFromConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// -f names the tree the target is declared in, and internal/spec walks
+	// it, so the specifications may sit a directory below the file.
 	var stdout, stderr bytes.Buffer
-	if got := run([]string{"generate", "-f", specs}, &stdout, &stderr); got != exitOK {
+	if got := run([]string{"generate", "-f", root}, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 

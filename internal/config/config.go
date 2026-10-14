@@ -29,8 +29,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"path/filepath"
+	"slices"
 
 	"sigs.k8s.io/yaml"
 )
@@ -107,36 +108,37 @@ type Limits struct {
 	// MaxFiringRatio is the fraction of the window a detector may have been
 	// paging for, between zero and one. Nil is no limit.
 	MaxFiringRatio *float64 `json:"maxFiringRatio,omitempty"`
+
+	// EpisodesFrom and RatioFrom are the file each limit came from, filled
+	// by resolution and empty on a file as decoded. A finding names them,
+	// because "over budget" is not actionable until a reader knows which
+	// file set the budget.
+	//
+	// There is no line number. The YAML here is decoded through
+	// encoding/json, which does not carry one, and a second parser to
+	// report it is more than the message is worth.
+	EpisodesFrom string `json:"-"`
+	RatioFrom    string `json:"-"`
 }
 
 // Unset reports limits that hold a detector to nothing.
 func (l Limits) Unset() bool { return l.MaxEpisodes == nil && l.MaxFiringRatio == nil }
 
-// For is the limits a detector is held to: the repository's, with each field
-// the file names for this detector in place of it.
+// For is the limits one file holds a detector to: this file's defaults and
+// its entry for this detector, whichever of the two is stricter in each
+// field.
 //
-// Merging field by field rather than replacing the whole set is what makes a
-// detector entry readable as the exception it is. A detector that needs a
-// higher episode count says so in one line and stays under the repository's
-// firing ratio.
+// Stricter binds everywhere, so the rule is one rule. A detector entry is how
+// a known-chatty detector is held tighter than its neighbours, and a looser
+// entry is refused at load rather than resolved here, because inside one file
+// a limit that can never apply is a mistake its author can see.
 //
-// A detector the file does not name gets the repository's limits, and a
-// detector named by a budget that no loaded specification declares is not an
-// error: the specifications a backtest was pointed at are often a subset of
-// the ones a repository holds.
+// A detector the file does not name gets the file's defaults, and a detector
+// named by a budget that no loaded specification declares is not an error:
+// the specifications a backtest was pointed at are often a subset of the ones
+// a repository holds.
 func (b Budget) For(detector string) Limits {
-	limits := b.Limits
-	override, ok := b.Detectors[detector]
-	if !ok {
-		return limits
-	}
-	if override.MaxEpisodes != nil {
-		limits.MaxEpisodes = override.MaxEpisodes
-	}
-	if override.MaxFiringRatio != nil {
-		limits.MaxFiringRatio = override.MaxFiringRatio
-	}
-	return limits
+	return b.tighten(b.Detectors[detector])
 }
 
 // Load reads one feno.yaml.
@@ -184,8 +186,13 @@ func (f File) validate() error {
 	if err := f.Budget.validate("budget"); err != nil {
 		return err
 	}
-	for name, limits := range f.Budget.Detectors {
-		if err := limits.validate(fmt.Sprintf("budget.detectors.%s", name)); err != nil {
+	for _, name := range slices.Sorted(maps.Keys(f.Budget.Detectors)) {
+		limits := f.Budget.Detectors[name]
+		field := fmt.Sprintf("budget.detectors.%s", name)
+		if err := limits.validate(field); err != nil {
+			return err
+		}
+		if err := limits.looser(f.Budget.Limits, field); err != nil {
 			return err
 		}
 	}
@@ -206,39 +213,9 @@ func (l Limits) validate(field string) error {
 	return nil
 }
 
-// Find walks up from a path looking for the nearest feno.yaml, and reports
-// where it found one.
-//
-// The walk starts at the path when it is a directory and beside it when it is
-// a file, so pointing a command at `detectors/checkout.yaml` and at
-// `detectors/` look for the same budget. It climbs because the file sits
-// above the specifications it governs: `alerting/feno.yaml` governs
-// `alerting/detectors/`. Climbing rather than reading the working directory
-// is what stops a budget being dropped by running the command from
-// somewhere else in the repository.
-//
-// The nearest file wins, which lets one repository hold a budget per
-// specification tree. The path comes back absolute, because the walk left
-// the directory the caller named and a relative path out of it reads as a
-// chain of parents rather than as a place.
-func Find(start string) (string, bool) {
-	dir, err := filepath.Abs(start)
-	if err != nil {
-		return "", false
-	}
-	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
-		dir = filepath.Dir(dir)
-	}
-
-	for {
-		candidate := filepath.Join(dir, Filename)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
+// regularFile reports a path that exists and is a file, which is the only
+// thing a feno.yaml can be.
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

@@ -80,13 +80,35 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	settings, err := loadConfig(*configPath, paths[0])
+	budget, err := newBudget(*configPath, paths)
 	if err != nil {
 		printf(stderr, "%s\n", err)
 		return exitUsage
 	}
-	if settings.Path == "" {
-		printf(stderr, "no %s found above %s: no noise budget is enforced\n", config.Filename, paths[0])
+
+	// Resolved before the first query, so a malformed budget fails in a
+	// second rather than after a month of history has been read, and so a run
+	// that cannot reach the datasource can still say which files it was going
+	// to enforce.
+	held := make([]detectorBudget, 0, len(bundle.Detectors))
+	for _, detector := range bundle.Detectors {
+		if *only != "" && detector.Metadata.Name != *only {
+			continue
+		}
+		limits, err := budget.limits(detector)
+		if err != nil {
+			printf(stderr, "%s\n", err)
+			return exitUsage
+		}
+		held = append(held, detectorBudget{detector: detector, thresholds: thresholds(limits)})
+	}
+	if len(held) == 0 {
+		printf(stderr, "no detector to report on in %s\n", strings.Join(paths, ", "))
+		return exitUsage
+	}
+	if len(budget.files()) == 0 {
+		printf(stderr, "no %s found under %s: no noise budget is enforced\n",
+			config.Filename, strings.Join(paths, ", "))
 	}
 
 	client, err := prometheus.New(*url)
@@ -103,12 +125,8 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		reported int
 		findings []string
 	)
-	for _, detector := range bundle.Detectors {
-		if *only != "" && detector.Metadata.Name != *only {
-			continue
-		}
-
-		report, err := backtest.Run(context.Background(), client, detector, options)
+	for _, held := range held {
+		report, err := backtest.Run(context.Background(), client, held.detector, options)
 		if err != nil {
 			// The gate degrades here rather than failing: a runner that
 			// cannot reach a datasource has not found a noisy detector, it
@@ -116,7 +134,7 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 			if prometheus.Unreachable(err) {
 				printf(stderr, "backtest skipped: %s is not reachable: %s\n", *url, err)
 				printf(stderr, "%s; the offline gates, feno generate --check and promtool check rules, still block\n",
-					unchecked(settings))
+					unchecked(budget.files()))
 				return exitSkipped
 			}
 			printf(stderr, "%s\n", err)
@@ -130,13 +148,9 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 			return exitUsage
 		}
 		reported++
-		findings = append(findings, report.Exceeded(thresholds(settings.Budget.For(detector.Metadata.Name)))...)
+		findings = append(findings, report.Exceeded(held.thresholds)...)
 	}
 
-	if reported == 0 {
-		printf(stderr, "no detector to report on in %s\n", strings.Join(paths, ", "))
-		return exitUsage
-	}
 	if len(findings) > 0 {
 		for _, finding := range findings {
 			printf(stderr, "%s\n", finding)
@@ -146,43 +160,71 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// loadConfig reads the feno.yaml holding the repository's targets and its
-// noise budget.
-//
-// A path given by flag has to be there, because somebody named it. Without
-// one the walk starts at the first specification path, so the budget beside
-// the specifications is found from wherever in the repository the command was
-// run, and a repository that has no budget comes back as a file with no path
-// rather than as an error.
-func loadConfig(flagPath, specPath string) (config.File, error) {
-	if flagPath != "" {
-		return config.Load(flagPath)
-	}
-	found, ok := config.Find(specPath)
-	if !ok {
-		return config.File{}, nil
-	}
-	return config.Load(found)
+// detectorBudget is one detector and the limits it is held to, paired before
+// anything is read so that the two cannot drift apart in the loop.
+type detectorBudget struct {
+	detector   spec.Detector
+	thresholds backtest.Thresholds
 }
 
-// unchecked says what a skipped run did not check, which is either a budget
-// somebody wrote or the absence of one.
-func unchecked(file config.File) string {
-	if file.Path == "" {
+// budget answers what each detector is held to.
+//
+// A -config path replaces the walk rather than joining it. One file named
+// explicitly is a run somebody can reproduce: what was passed is what
+// applied, with nothing picked up from where the specifications happen to
+// sit. Without it the budget is resolved per detector from the files above
+// it, which is [config.Scope].
+type budget struct {
+	named *config.File
+	scope *config.Scope
+}
+
+func newBudget(flagPath string, paths []string) (budget, error) {
+	if flagPath == "" {
+		return budget{scope: config.NewScope(paths...)}, nil
+	}
+	file, err := config.Load(flagPath)
+	if err != nil {
+		return budget{}, err
+	}
+	return budget{named: &file}, nil
+}
+
+func (b budget) limits(detector spec.Detector) (config.Limits, error) {
+	if b.named != nil {
+		return b.named.LimitsFor(detector.Metadata.Name), nil
+	}
+	return b.scope.Limits(detector.File, detector.Metadata.Name)
+}
+
+func (b budget) files() []string {
+	if b.named != nil {
+		return []string{b.named.Path}
+	}
+	return b.scope.Files()
+}
+
+// unchecked says what a skipped run did not check, which is either budgets
+// somebody wrote or the absence of any.
+func unchecked(files []string) string {
+	if len(files) == 0 {
 		return "no noise budget was found, so none was checked"
 	}
-	return "the noise budget in " + file.Path + " was not checked"
+	return "the noise budget in " + strings.Join(files, ", ") + " was not checked"
 }
 
 // thresholds is the loaded limits in the form the report compares against,
-// where an unset limit is a negative number rather than a nil pointer.
+// where an unset limit is a negative number rather than a nil pointer, and
+// each limit carries the file that set it so the finding can name it.
 func thresholds(limits config.Limits) backtest.Thresholds {
 	out := backtest.NoThresholds
 	if limits.MaxEpisodes != nil {
 		out.MaxEpisodes = *limits.MaxEpisodes
+		out.EpisodesFrom = limits.EpisodesFrom
 	}
 	if limits.MaxFiringRatio != nil {
 		out.MaxFiringRatio = *limits.MaxFiringRatio
+		out.RatioFrom = limits.RatioFrom
 	}
 	return out
 }

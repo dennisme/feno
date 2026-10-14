@@ -965,7 +965,7 @@ PromQL.
 | Tuning | `feno backtest --from -30d` | A laptop, repeatedly | Read access to history |
 | Drift gate | `feno generate --check` | CI, every pull request | Nothing. Offline |
 | Output check | `promtool check rules` | CI, every pull request | Nothing. Offline |
-| Noise budget | `feno backtest --max-firing-episodes` | CI, on changed specifications | Read access to history |
+| Noise budget | `feno backtest`, against the budget in `feno.yaml` | CI, on changed specifications | Read access to history |
 | Deploy | none of feno's business | git-sync, a ConfigMap, the Mimir ruler API, `kubectl`, or clickhouse-ruler's own git-sync | |
 
 Two of those five checks are offline, which matters: the drift gate and
@@ -976,6 +976,78 @@ The noise budget belongs in `feno.yaml` rather than in the workflow's flags. A
 budget somebody can drop by editing a workflow file is not a budget, and the
 same argument applies here as applies to check severities living in a policy
 file in clickhouse-ruler.
+
+### More than one team in one repository
+
+A repository with a team per directory has a budget per team, and one pull
+request gate covers all of them. So the budget is resolved per detector, not
+once per run: every `feno.yaml` from the path the command was pointed at down
+to the detector's own directory applies, and each field resolves to the
+stricter of what they say.
+
+```text
+alerting/
+  feno.yaml                   # the ceiling, owned by whoever owns the platform
+  teams/checkout/
+    feno.yaml                 # checkout's budget, and CODEOWNERS on this line
+    detectors/
+```
+
+A team may tighten what the repository set and may not loosen it, which is the
+argument that put the budget in a file one level up again. Inside one file a
+detector entry looser than that file's own default is an error, because one
+author owns it and can see the mistake. Across two files it is dead config
+rather than an error: the authors are different people, and a repository-wide
+tightening that broke every team's build at once would be reverted rather than
+honoured.
+
+The walk stops where `-f` points. A file above it was never asked for, and a
+budget that binds because of where somebody was standing is the thing this
+design is avoiding. Pointing at the tree is how a ceiling is asked for, which
+is why a directory is walked rather than read one level deep.
+
+Every finding names the file that set the limit it broke. In a repository with
+a budget per team that file is often not the one the author has open, and
+"over budget" without it is a sentence nobody can act on.
+
+### Over budget on purpose
+
+Not implemented. The loader it needs exists.
+
+A detector over its budget has two ways through a pull request: tune it until
+it fits, or raise the number. Tuning is the outcome the gate is for. Raising
+the number is one reviewed line, which sounds acceptable and is how a budget
+rots, because the raise outlives the incident that justified it and nothing
+ever brings the decision back.
+
+So the third way is a waiver that expires. The detector stays over budget, the
+finding is still reported, the build does not fail, and the build starts
+failing once the date passes.
+
+```yaml
+budget:
+  maxEpisodes: 4
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: black friday traffic shape, retuning after the freeze
+        until: 2026-12-05
+```
+
+The vocabulary is clickhouse-ruler's on purpose. Its convention checks are
+exempted the same way, with a reason and an expiry that fails the build once it
+passes, and two tools in the same pipeline answering this question differently
+costs more than either answer.
+
+An expiry rather than a permanent override is the whole idea. A permanent
+override is the raised number with extra words on it. A date is a promise
+somebody has to keep or renew in a diff a reviewer sees, and a renewal that
+keeps happening is the signal that the detector is the problem.
+
+Nothing in the file waives the offline gates. `generate --check` and `promtool`
+are correctness, and a rule that fails either cannot do its job, which is the
+same line clickhouse-ruler draws between the checks an operator may configure
+and the ones that always block.
 
 ### The adoption friction worth naming
 
