@@ -126,6 +126,7 @@ just          # list recipes
 just check    # what CI runs: lint, build, tests, promtool, markdownlint
 just test     # unit tests with -race
 just smoketest # the capability probe against two real Prometheus servers
+just backtest-history # the backtest against a month of generated history
 just init     # mise tool versions and pre-commit hooks
 ```
 
