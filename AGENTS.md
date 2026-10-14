@@ -28,7 +28,7 @@ Everything goes through [`just`](https://github.com/casey/just). Run `just` on
 its own to list recipes.
 
 ```bash
-just check            # what CI runs: lint, build, unit tests, markdownlint
+just check            # what CI runs: lint, build, unit tests, promtool, markdownlint
 just test             # unit tests with -race
 just lint             # golangci-lint, formatting checked via `fmt --diff`
 just fix              # apply every fix golangci-lint can make

@@ -80,14 +80,12 @@ release-snapshot:
 
 # Check every generated rule file with promtool.
 #
-# Not part of `check` yet, because promtool is not in .tool-versions and a
-# recipe that fails on a tool nobody was asked to install is worse than one
-# that has to be run on purpose. The Go test skips with the same message, so
-# an absent promtool is visible rather than silent. spec.md Part 9 counts on
-# this being free verification, so it belongs in `check` as soon as the tool
-# is pinned.
+# spec.md Part 9 counts on this being free verification: the emitter is checked
+# by the tool that reads the files, not by a fixture of what it says. The
+# version comes from .tool-versions, which moves with the prom/prometheus image
+# the smoketest runs.
 promtool:
-    command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; add it to .tool-versions"; exit 1; }
+    command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; run 'just init'"; exit 1; }
     promtool check rules --enable-feature=promql-experimental-functions internal/rules/testdata/golden/*.yml
     out=$(mktemp -d); \
     go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" --experimental-functions >/dev/null; \
@@ -141,4 +139,4 @@ smoketest:
     echo "smoketest: both forms compiled from what the server answered"
 
 # Everything CI runs, in the order CI runs it.
-check: lint build test markdownlint
+check: lint build test promtool markdownlint

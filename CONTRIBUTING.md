@@ -14,7 +14,7 @@ change outright. Nothing here needs a migration path or a compatibility shim.
 
 ```bash
 just init     # mise tool versions and pre-commit hooks
-just check    # lint, build, unit tests, markdownlint
+just check    # lint, build, unit tests, promtool, markdownlint
 ```
 
 `just check` is what CI runs, in the order CI runs it. Run it before claiming
