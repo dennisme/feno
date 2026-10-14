@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/dennisme/feno/internal/prometheus"
 	"github.com/dennisme/feno/internal/rules"
 	"github.com/dennisme/feno/internal/spec"
 )
@@ -25,7 +28,9 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 	var (
 		fs           = flag.NewFlagSet("generate", flag.ContinueOnError)
 		paths        pathList
-		target       = fs.String("t", prometheusTarget, "the engine the rules are for")
+		headers      headerList
+		engine       = fs.String("t", prometheusTarget, "the engine the rules are for")
+		url          = fs.String("url", "", "base URL of the server the rules will run on, probed once for the optional functions it has")
 		out          = fs.String("o", "", "directory the rule files are written to, and compared against under --check")
 		step         = fs.Duration("step", defaultStep, "the interval the rules will be evaluated at, which the bands are computed for")
 		check        = fs.Bool("check", false, "write nothing and fail if what is in the output directory is not what these specifications compile to")
@@ -33,6 +38,7 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 			"the server was started with --enable-feature=promql-experimental-functions, which is what gates mad_over_time")
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
+	fs.Var(&headers, "header", "a header to send with the probe, as name=value; repeatable")
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		printf(stderr, "usage: feno generate -f <path> -o <directory> [--check]\n\n")
@@ -46,8 +52,15 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return exitUsage
 	}
-	if *target != prometheusTarget {
-		printf(stderr, "-t %q: the only target is %q\n", *target, prometheusTarget)
+	if *engine != prometheusTarget {
+		printf(stderr, "-t %q: the only target is %q\n", *engine, prometheusTarget)
+		return exitUsage
+	}
+	// Both flags answer the same question and the answers disagree by
+	// construction, so preferring either one silently would be a flag that
+	// does nothing.
+	if given(fs, "url") && given(fs, "experimental-functions") {
+		printf(stderr, "--url and --experimental-functions together: one asks the server whether it has mad_over_time, the other answers for it\n")
 		return exitUsage
 	}
 
@@ -61,7 +74,17 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	files, err := emit(rules.Target{ExperimentalFunctions: *experimental}, *step, bundle.Detectors, stderr)
+	target := rules.Target{ExperimentalFunctions: *experimental}
+	if *url != "" {
+		probed, err := probe(*url, http.Header(headers), stderr)
+		if err != nil {
+			printf(stderr, "%s\n", err)
+			return exitUsage
+		}
+		target = probed
+	}
+
+	files, err := emit(target, *step, bundle.Detectors, stderr)
 	if err != nil {
 		printf(stderr, "%s\n", err)
 		return exitUsage
@@ -71,6 +94,45 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		return verify(*out, files, stdout, stderr)
 	}
 	return write(*out, files, stdout, stderr)
+}
+
+// given reports whether a flag was named on the command line, which is the
+// only way to tell a flag left at its default from one set to it.
+func given(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+// probe asks the server which form of the robust band it can evaluate.
+//
+// Only the server knows: the functions a band may use are gated by how the
+// process was started, and nothing in a specification file can say. The
+// decision is said out loud because it changes the rules that come out, and a
+// rule that changed shape between two runs has to explain itself.
+func probe(url string, header http.Header, stderr io.Writer) (rules.Target, error) {
+	client, err := prometheus.New(url)
+	if err != nil {
+		return rules.Target{}, err
+	}
+	client.Header = header
+
+	capabilities, err := client.Probe(context.Background())
+	if err != nil {
+		return rules.Target{}, err
+	}
+
+	form := "mad_over_time unavailable, emitting interquartile range"
+	if capabilities.ExperimentalFunctions {
+		form = "mad_over_time available, emitting median absolute deviation"
+	}
+	printf(stderr, "probed %s: %s\n", url, form)
+
+	return rules.Target{ExperimentalFunctions: capabilities.ExperimentalFunctions}, nil
 }
 
 // file is one rule file: the name it takes in the output directory, and the

@@ -34,6 +34,8 @@ just lint             # golangci-lint, formatting checked via `fmt --diff`
 just fix              # apply every fix golangci-lint can make
 just build            # go build ./...
 just coverage         # coverage across the tree
+just promtool         # promtool check rules over every generated rule file
+just smoketest        # the capability probe against two real Prometheus servers
 just markdownlint     # markdownlint-cli2 over the docs
 just docs-serve       # preview the documentation site locally
 just init             # mise tool versions and pre-commit hooks

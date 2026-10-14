@@ -1,0 +1,40 @@
+# Two Prometheus servers, identical but for the one flag that decides which
+# form of the robust band feno is allowed to compile.
+#
+# This is what no fixture can be evidence for. The probe reads a parse error
+# and matches the name of the function in it, so a fixture asserting that text
+# asserts whatever was written into it. Only a server started both ways says
+# whether the read is right, and whether it is still right after an upgrade.
+#
+# The version is pinned because the answer being tested is a property of a
+# release: mad_over_time has been behind the flag since 2.49.0 and is still
+# behind it in 3.14.0, and the day it is promoted the plain server starts
+# answering the probe. That is a change feno wants to find out about from a
+# failing smoketest rather than from a rule that quietly changed shape.
+services:
+  plain:
+    image: prom/prometheus:v3.14.0
+    ports:
+      - "19090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  experimental:
+    image: prom/prometheus:v3.14.0
+    ports:
+      - "19091:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --enable-feature=promql-experimental-functions
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
