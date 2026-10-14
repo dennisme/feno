@@ -49,10 +49,13 @@ package prometheus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -268,4 +271,28 @@ func (c *Client) post(ctx context.Context, endpoint *url.URL, form url.Values) (
 func formatTime(t time.Time) string {
 	seconds := float64(t.Unix()) + float64(t.Nanosecond())/1e9
 	return strconv.FormatFloat(seconds, 'f', -1, 64)
+}
+
+// Unreachable reports an error that means the server was never spoken to: a
+// name that does not resolve, a connection refused or reset, a dial or a read
+// that timed out.
+//
+// It is the question a CI gate asks before deciding whether it ran. A backtest
+// that cannot reach a datasource is a check that was skipped, and a backtest
+// whose query the server rejected is a check that failed, and the two want
+// different exit codes.
+//
+// A server that answered is reachable, whatever it answered. A 401, a 403 and
+// a rejected query are all configuration to fix rather than a missing network
+// path, so none of them is this, and a TLS handshake that failed is a
+// certificate to fix rather than an absent server.
+func Unreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var (
+		dns *net.DNSError
+		op  *net.OpError
+	)
+	return errors.As(err, &dns) || errors.As(err, &op) || os.IsTimeout(err)
 }

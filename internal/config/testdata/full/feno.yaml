@@ -1,0 +1,13 @@
+targets:
+  - engine: prometheus
+    output: rules/anomaly/
+
+budget:
+  maxEpisodes: 4
+  maxFiringRatio: 0.02
+  detectors:
+    checkout-request-rate:
+      maxEpisodes: 12
+    quiet-detector:
+      maxEpisodes: 0
+      maxFiringRatio: 0

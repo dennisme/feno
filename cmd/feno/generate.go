@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dennisme/feno/internal/config"
 	"github.com/dennisme/feno/internal/prometheus"
 	"github.com/dennisme/feno/internal/rules"
 	"github.com/dennisme/feno/internal/spec"
@@ -31,9 +32,10 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		headers      headerList
 		engine       = fs.String("t", prometheusTarget, "the engine the rules are for")
 		url          = fs.String("url", "", "base URL of the server the rules will run on, probed once for the optional functions it has")
-		out          = fs.String("o", "", "directory the rule files are written to, and compared against under --check")
+		out          = fs.String("o", "", "directory the rule files are written to, and compared against under --check; the target in "+config.Filename+" when unset")
 		step         = fs.Duration("step", defaultStep, "the interval the rules will be evaluated at, which the bands are computed for")
 		check        = fs.Bool("check", false, "write nothing and fail if what is in the output directory is not what these specifications compile to")
+		configPath   = fs.String("config", "", "the "+config.Filename+" declaring the target; found by walking up from the specifications when unset")
 		experimental = fs.Bool("experimental-functions", false,
 			"the server was started with --enable-feature=promql-experimental-functions, which is what gates mad_over_time")
 	)
@@ -41,14 +43,14 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&headers, "header", "a header to send with the probe, as name=value; repeatable")
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		printf(stderr, "usage: feno generate -f <path> -o <directory> [--check]\n\n")
+		printf(stderr, "usage: feno generate -f <path> [-o <directory>] [--check]\n\n")
 		fs.PrintDefaults()
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-	if len(paths) == 0 || *out == "" {
+	if len(paths) == 0 {
 		fs.Usage()
 		return exitUsage
 	}
@@ -61,6 +63,18 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 	// does nothing.
 	if given(fs, "url") && given(fs, "experimental-functions") {
 		printf(stderr, "--url and --experimental-functions together: one asks the server whether it has mad_over_time, the other answers for it\n")
+		return exitUsage
+	}
+
+	settings, err := loadConfig(*configPath, paths[0])
+	if err != nil {
+		printf(stderr, "%s\n", err)
+		return exitUsage
+	}
+	directory, err := output(*out, *engine, settings)
+	if err != nil {
+		printf(stderr, "%s\n", err)
+		fs.Usage()
 		return exitUsage
 	}
 
@@ -91,9 +105,31 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *check {
-		return verify(*out, files, stdout, stderr)
+		return verify(directory, files, stdout, stderr)
 	}
-	return write(*out, files, stdout, stderr)
+	return write(directory, files, stdout, stderr)
+}
+
+// output is the directory the rule files belong in: the flag when it was
+// given, and otherwise the target the repository declared.
+//
+// A path in feno.yaml is read relative to that file rather than to the
+// working directory. The file describes a repository's layout, and a command
+// is run from wherever somebody happens to be standing, so the two have to be
+// anchored to the file that made the claim.
+func output(flagPath, engine string, settings config.File) (string, error) {
+	if flagPath != "" {
+		return flagPath, nil
+	}
+	target, ok := settings.Target(engine)
+	if !ok {
+		if settings.Path == "" {
+			return "", fmt.Errorf("no -o and no %s above the specifications: one of the two has to say where the rules go",
+				config.Filename)
+		}
+		return "", fmt.Errorf("no -o, and %s declares no target for %q", settings.Path, engine)
+	}
+	return filepath.Join(filepath.Dir(settings.Path), target.Output), nil
 }
 
 // given reports whether a flag was named on the command line, which is the

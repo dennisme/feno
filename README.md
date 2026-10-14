@@ -11,11 +11,31 @@ high, it is anomalous because it is high for a Tuesday at 03:00.
 ## Status: both commands run against Prometheus
 
 `feno backtest` replays a detector over real history and prints the report.
-It needs a URL and read access, writes nothing, and exits non-zero when a
-threshold flag is exceeded, so it can gate a pull request.
+It needs a URL and read access, writes nothing, and exits 1 when a detector is
+over the noise budget in `feno.yaml`, so it can gate a pull request. A runner
+that cannot reach the datasource exits 3 instead, which says the budget was
+never checked rather than that it held.
 
 ```bash
 feno backtest -f detectors/ --url http://mimir/prometheus --from -30d
+```
+
+The budget lives in `feno.yaml` beside the specifications, found by walking up
+from them, because a limit somebody can drop by editing the workflow that
+checks it is not a limit. One default for the repository, and a detector that
+needs its own says so in a line:
+
+```yaml
+targets:
+  - engine: prometheus
+    output: rules/anomaly
+
+budget:
+  maxEpisodes: 4
+  maxFiringRatio: 0.02
+  detectors:
+    checkout-request-rate:
+      maxEpisodes: 12
 ```
 
 `feno generate` compiles each specification into a rule file, one file per
@@ -30,6 +50,9 @@ a flag somebody had to know the answer to. Without it the compilation is
 offline and `--experimental-functions` decides, which is what keeps the drift
 gate working on a fork pull request with no path to production.
 
+`-o` is the target's `output` in `feno.yaml` when it is left off, read
+relative to the file that declared it.
+
 ```bash
 feno generate -f detectors/ -o rules/anomaly/
 feno generate -f detectors/ -o rules/anomaly/ --check
@@ -43,6 +66,7 @@ feno generate -f detectors/ -o rules/anomaly/ --url http://mimir/prometheus
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
 | `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and refuses a band PromQL cannot express rather than approximating it |
+| `internal/config` | Reads `feno.yaml`: the repository's targets and its noise budget, with a limit per detector where one default will not do |
 | `internal/backtest` | Ties the four together: the query range a band's lookback demands, the aggregation across the series one query returns, and the report a person reads |
 
 Specification to band to episodes to report is `backtest`, and specification

@@ -1,0 +1,5 @@
+budget:
+  maxEpisodes: 4
+  detectors:
+    checkout-request-rate:
+      maxEpisodes: 0

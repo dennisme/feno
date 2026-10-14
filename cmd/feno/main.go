@@ -10,12 +10,20 @@ import (
 	"github.com/dennisme/feno/internal/buildinfo"
 )
 
-// Exit codes. A finding and a failure to run are separated so CI can tell
-// "your specs are wrong" from "the tool could not run".
+// Exit codes. A finding, a failure to run and a check that could not run are
+// separated so CI can tell "your specs are wrong" from "the tool could not
+// run" from "nobody checked".
+//
+// exitSkipped exists because of how the pull request gate degrades. A runner
+// with no network path to production cannot backtest, and the two codes it
+// would otherwise reuse both lie: zero says the budget held, and one says it
+// was broken. A workflow reads this one and decides for itself whether a
+// detector may merge unchecked.
 const (
 	exitOK      = 0
 	exitFinding = 1
 	exitUsage   = 2
+	exitSkipped = 3
 )
 
 // printf writes diagnostic output. A write to stdout or stderr that fails

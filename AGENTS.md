@@ -56,10 +56,15 @@ The tag comes from `-ldflags "-X .../internal/buildinfo.Version=<tag>"` at
 release time and reads `dev` otherwise; the rest comes from the toolchain.
 
 `backtest` reads history and prints the report. It writes nothing, needs only
-a range query endpoint, and exits 1 when `--max-episodes` or
-`--max-firing-ratio` is exceeded so it can gate a pull request. `--from` takes
-OpenSLO's duration shorthand, so `-30d` and `-1w` work where Go's own parser
-has no unit for either.
+a range query endpoint, and exits 1 when a detector is over the noise budget
+in `feno.yaml` so it can gate a pull request. A datasource it cannot reach
+exits 3, which is a check that did not run rather than one that passed.
+`--from` takes OpenSLO's duration shorthand, so `-30d` and `-1w` work where
+Go's own parser has no unit for either.
+
+The budget is a file and not a flag, and `internal/config` holds the reason at
+length. `feno.yaml` is found by walking up from the specifications, or named
+with `-config`.
 
 The tests that need a real Prometheus are behind the `integration` tag and
 skip with a message naming the environment variables they want.
@@ -81,15 +86,16 @@ What exists:
 | `internal/detect` | The band representation. One implementation, compiled by every target and evaluated by the backtest, because a second one makes the backtest stop predicting production |
 | `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, and declares what the target cannot express |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for` |
+| `internal/config` | `feno.yaml`: the repository's targets and its noise budget, found by walking up from the specifications. A limit is a pointer, because zero is a budget somebody means |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the aggregation across one query's series, and the report a person reads |
 | `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |
 | `history/` | A Prometheus over a generated month of TSDB blocks, for the backtest's read against a range past the resolution limit |
 | `docs/` | The published site |
 | `spec.md` | Design, research, and the decisions already settled |
 
-Every package the specification calls for now exists. What is missing is a
-command, `generate`, over `internal/rules`, and the ClickHouse target. Do not
-create a package as an empty directory ahead of the work that fills it.
+Every package the specification calls for now exists. What is missing is the
+ClickHouse target and `feno suggest --from-sli`. Do not create a package as an
+empty directory ahead of the work that fills it.
 
 ## Conventions
 
@@ -138,8 +144,9 @@ Never bypass a pre-commit hook. Do not commit unless asked to.
 
 ## Status
 
-`feno version` and `feno backtest` run. A detector document loads into a
-`detect.Spec`, compiles into a Prometheus rule file, and replays over history
-into a report; what is missing is `generate` and the ClickHouse target. The
-README `Status` and `Build order` sections say what is next; keep them accurate
-when you land something they describe.
+`feno version`, `feno generate` and `feno backtest` run. A detector document
+loads into a `detect.Spec`, compiles into a Prometheus rule file, and replays
+over history into a report that is held to the budget in `feno.yaml`; what is
+missing is the ClickHouse target and `feno suggest`. The README `Status` and
+`Build order` sections say what is next; keep them accurate when you land
+something they describe.

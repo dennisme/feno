@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dennisme/feno/internal/config"
 )
 
 // generated writes the rule files for testdata/detectors into a fresh
@@ -332,5 +334,83 @@ func TestGenerateProbeFailureWritesNothing(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("a failed probe wrote %d files, want none", len(entries))
+	}
+}
+
+// TestGenerateOutputFromConfig is the output directory as a fact about the
+// repository rather than a flag every invocation has to repeat. The target in
+// feno.yaml is found by walking up from the specifications, which is the same
+// walk the noise budget takes.
+func TestGenerateOutputFromConfig(t *testing.T) {
+	root := t.TempDir()
+	specs := filepath.Join(root, "detectors")
+	if err := os.MkdirAll(specs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	detector, err := os.ReadFile("testdata/detectors/checkout.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specs, "checkout.yaml"), detector, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := "targets:\n  - engine: prometheus\n    output: rules/anomaly\n"
+	if err := os.WriteFile(filepath.Join(root, config.Filename), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := run([]string{"generate", "-f", specs}, &stdout, &stderr); got != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
+	}
+
+	// The output path is relative to the file that declared it, not to the
+	// working directory, because the file describes a repository layout and a
+	// command is run from wherever somebody happens to be.
+	written := filepath.Join(root, "rules", "anomaly", "checkout.yaml")
+	if _, err := os.Stat(written); err != nil {
+		t.Fatalf("expected a rule file at %s: %v", written, err)
+	}
+	// Writing somewhere a reader cannot predict is worse than refusing, so
+	// the directory it chose is said out loud.
+	if !strings.Contains(stdout.String()+stderr.String(), filepath.Join(root, "rules", "anomaly")) {
+		t.Errorf("output = %q, want it to name the directory it wrote to", stdout.String()+stderr.String())
+	}
+}
+
+// TestGenerateOutputFlagBeatsConfig keeps the flag winning. The budget is the
+// thing a flag may not loosen; an output directory is not a limit.
+func TestGenerateOutputFlagBeatsConfig(t *testing.T) {
+	root := t.TempDir()
+	settings := "targets:\n  - engine: prometheus\n    output: rules/anomaly\n"
+	if err := os.WriteFile(filepath.Join(root, config.Filename), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "-config", filepath.Join(root, config.Filename)}
+	if got := run(args, &stdout, &stderr); got != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(out, "checkout.yaml")); err != nil {
+		t.Fatalf("expected a rule file at %s: %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "rules", "anomaly")); err == nil {
+		t.Error("the config output directory was written to as well as the flag's")
+	}
+}
+
+// TestGenerateNoOutputAnywhere is the invocation that cannot know where to
+// write. It says both ways of saying so rather than only naming the flag.
+func TestGenerateNoOutputAnywhere(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	got := run([]string{"generate", "-f", "testdata/detectors"}, &stdout, &stderr)
+	if got != exitUsage {
+		t.Errorf("exit code = %d, want %d", got, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), config.Filename) {
+		t.Errorf("stderr = %q, want it to name %s", stderr.String(), config.Filename)
 	}
 }

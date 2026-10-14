@@ -3,9 +3,15 @@ package main
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dennisme/feno/internal/backtest"
+	"github.com/dennisme/feno/internal/config"
 )
 
 // TestBacktestFlags covers every way the command refuses to run.
@@ -78,6 +84,37 @@ func TestBacktestFlags(t *testing.T) {
 				"--from", "-30d", "--header", "X-Scope-OrgID"},
 			want:     exitUsage,
 			inStderr: "is not name=value",
+		},
+		{
+			// The budget is a file, and these two were how it used to be a
+			// flag. Refusing them by name is the flag package's own message,
+			// which names the flag that is gone.
+			name: "a budget passed as a flag",
+			args: []string{"-f", detectors, "--url", "http://localhost:9090",
+				"--from", "-30d", "--max-episodes", "4"},
+			want:     exitUsage,
+			inStderr: "flag provided but not defined: -max-episodes",
+		},
+		{
+			name: "a firing ratio passed as a flag",
+			args: []string{"-f", detectors, "--url", "http://localhost:9090",
+				"--from", "-30d", "--max-firing-ratio", "0.02"},
+			want:     exitUsage,
+			inStderr: "flag provided but not defined: -max-firing-ratio",
+		},
+		{
+			name: "a config file that is not there",
+			args: []string{"-f", detectors, "--url", "http://localhost:9090",
+				"--from", "-30d", "-config", "testdata/config/nope.yaml"},
+			want:     exitUsage,
+			inStderr: "testdata/config/nope.yaml",
+		},
+		{
+			name: "a config file with a misspelled field",
+			args: []string{"-f", detectors, "--url", "http://localhost:9090",
+				"--from", "-30d", "-config", "testdata/config/misspelled.yaml"},
+			want:     exitUsage,
+			inStderr: "maxEpisode",
 		},
 		{
 			// The filter names nothing, so nothing is read. Saying so is the
@@ -170,5 +207,108 @@ func TestHeaderList(t *testing.T) {
 		if err := headers.Set(bad); err == nil {
 			t.Errorf("Set(%q) returned no error", bad)
 		}
+	}
+}
+
+// TestBacktestSkipsUnreachableDatasource is the degrade a pull request gate
+// depends on: a runner with no network path to production neither passes the
+// budget nor fails the build, it says the check did not run and exits in a
+// code of its own.
+func TestBacktestSkipsUnreachableDatasource(t *testing.T) {
+	// A server that existed and does not now, so the dial is really refused
+	// rather than a fixture saying it was.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+
+	root := t.TempDir()
+	budget := filepath.Join(root, config.Filename)
+	if err := os.WriteFile(budget, []byte("budget:\n  maxEpisodes: 4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	specs := filepath.Join(root, "detectors")
+	if err := os.MkdirAll(specs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := os.ReadFile("testdata/detectors/checkout.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specs, "checkout.yaml"), spec, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"backtest", "-f", specs, "--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
+
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	for _, want := range []string{"skipped", "not reachable", "offline"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+		}
+	}
+	// The budget was found by walking up from the specifications, and the
+	// skip names it, because what went unchecked is the thing a reviewer has
+	// to decide to accept.
+	if !strings.Contains(stderr.String(), budget) {
+		t.Errorf("stderr = %q, want it to name the budget at %q", stderr.String(), budget)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing", stdout.String())
+	}
+}
+
+// TestBacktestWithoutBudgetSaysSo is the repository that has no feno.yaml. The
+// run is not an error, and it says on the way out that nothing was enforced,
+// because a gate that quietly checks nothing is worse than no gate.
+func TestBacktestWithoutBudgetSaysSo(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"backtest", "-f", "testdata/detectors/checkout.yaml",
+		"--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
+
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no "+config.Filename) {
+		t.Errorf("stderr = %q, want it to say no %s was found", stderr.String(), config.Filename)
+	}
+}
+
+// TestThresholds covers the two shapes a limit arrives in: a field the file
+// set, including zero, and a field it left alone.
+func TestThresholds(t *testing.T) {
+	episodes, ratio := 0, 0.25
+
+	tests := []struct {
+		name   string
+		limits config.Limits
+		want   backtest.Thresholds
+	}{
+		{
+			name: "nothing set",
+			want: backtest.NoThresholds,
+		},
+		{
+			name:   "a detector that may never page",
+			limits: config.Limits{MaxEpisodes: &episodes},
+			want:   backtest.Thresholds{MaxEpisodes: 0, MaxFiringRatio: -1},
+		},
+		{
+			name:   "both limits",
+			limits: config.Limits{MaxEpisodes: &episodes, MaxFiringRatio: &ratio},
+			want:   backtest.Thresholds{MaxEpisodes: 0, MaxFiringRatio: 0.25},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := thresholds(tt.limits); got != tt.want {
+				t.Errorf("thresholds = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }
