@@ -138,13 +138,20 @@ smoketest:
 
     echo "smoketest: both forms compiled from what the server answered"
 
-# Prove a chunked range query lands on the grid the band is evaluated against.
+# Prove a chunked range query lands on the grid the band is evaluated against,
+# and that the burn signal's own read lands on the same one.
 #
 # Not part of `check`, because it needs Docker. What it covers is the one
 # thing no fixture can be evidence for: a /api/v1/query_range longer than the
 # server's resolution limit, split into chunks and stitched back together,
 # whose samples have to carry the exact timestamps internal/detect matches
 # instants against. A grid off by a millisecond reports nothing but absence.
+#
+# The budget overlap is the second read of the same window, so the seed emits
+# a good-request series beside the total one and the queries below are the two
+# halves of an SLO ratio over them. An overlap is an intersection of two
+# timelines, and two grids offset from each other intersect in nothing however
+# much the data coincided.
 #
 # The history is generated and imported on every run rather than committed,
 # because the window the test asks for ends now: yesterday's blocks are
@@ -174,6 +181,8 @@ backtest-history:
 
     FENO_PROMETHEUS_URL=http://localhost:19092 \
     FENO_PROMETHEUS_QUERY=feno_requests_per_second \
+    FENO_SLO_GOOD_QUERY='sum(feno_good_per_second)' \
+    FENO_SLO_TOTAL_QUERY='sum(feno_requests_per_second)' \
         env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration ./internal/backtest/
 
 # Everything CI runs, in the order CI runs it.

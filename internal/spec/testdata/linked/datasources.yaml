@@ -1,0 +1,8 @@
+apiVersion: openslo/v1
+kind: DataSource
+metadata:
+  name: mimir-prod
+spec:
+  type: Prometheus
+  connectionDetails:
+    url: http://mimir.example.com/prometheus

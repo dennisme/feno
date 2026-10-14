@@ -34,6 +34,16 @@
 // clickhouse-ruler evaluates `for` itself and the ClickHouse target will have
 // to match whatever it does rather than what Prometheus does.
 //
+// # Why the intersection with another timeline is here
+//
+// [Overlaps] answers how much of an episode's firing time coincided with some
+// other condition, which for a backtest is an SLO's error budget burning. It
+// is here rather than beside the reader because it is the same kind of thing
+// as everything else in this package: a pure function over samples on one
+// grid, whose semantics are pinned by tests and not discovered against a
+// server. What it does not do is read the second timeline or choose the
+// denominator the result is reported over, both of which are the caller's.
+//
 // # What this package deliberately does not compute
 //
 // Firing time as a percentage of the window needs the range that was asked

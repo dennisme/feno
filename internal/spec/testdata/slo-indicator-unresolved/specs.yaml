@@ -1,0 +1,33 @@
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-availability
+spec:
+  service: checkout
+  indicatorRef: checkout-success-ratio
+  budgetingMethod: Occurrences
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - target: 0.999
+---
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  sloRef: checkout-availability
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total[5m]))
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: balanced

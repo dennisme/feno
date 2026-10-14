@@ -11,6 +11,12 @@
 // seasonality fitted against a flat line computes a band of nothing, and a
 // report of nothing is evidence the read happened, not that the read landed
 // where the band was evaluated.
+//
+// A second family carries the successful half of the same traffic, so that an
+// SLO over the pair has an error budget that is spent sometimes and not
+// always. That is what the budget overlap needs to be evidence of anything:
+// the overlap is an intersection of two range reads, and two reads on grids
+// offset from each other intersect in nothing whatever the data did.
 package main
 
 import (
@@ -25,9 +31,26 @@ import (
 	"time"
 )
 
-// metric is what the recipe passes as FENO_PROMETHEUS_QUERY, so the name here
-// and the query there are one decision.
-const metric = "feno_requests_per_second"
+// The metric names the recipe passes as queries, so the names here and the
+// queries there are one decision.
+const (
+	// requestMetric is the series a detector watches.
+	requestMetric = "feno_requests_per_second"
+
+	// goodMetric is the part of it that succeeded, which is the good half of
+	// the SLO's ratio. The total half is requestMetric.
+	goodMetric = "feno_good_per_second"
+)
+
+// metrics is every family written, with the line that describes it.
+var metrics = []struct {
+	name string
+	help string
+	good bool
+}{
+	{name: requestMetric, help: "Synthetic request rate with daily shape."},
+	{name: goodMetric, help: "The part of the synthetic request rate that succeeded.", good: true},
+}
 
 // services are the label sets, one series each. More than one because the
 // reader stitches a chunked range back together per label set, and a single
@@ -64,25 +87,48 @@ func main() {
 func emit(w io.Writer, span, step time.Duration, end time.Time) error {
 	start := end.Add(-span)
 
-	if _, err := fmt.Fprintf(w, "# HELP %s Synthetic request rate with daily shape.\n# TYPE %s gauge\n", metric, metric); err != nil {
-		return err
-	}
+	for _, metric := range metrics {
+		if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n",
+			metric.name, metric.help, metric.name); err != nil {
+			return err
+		}
 
-	for i, service := range services {
-		// Seeded per series index rather than from the clock, so two runs over
-		// the same span differ only in where the span sits. Reproducibility is
-		// the property wanted, which is what a weak generator gives.
-		noise := rand.New(rand.NewPCG(uint64(i), 0)) //nolint:gosec
-		for at := start; !at.After(end); at = at.Add(step) {
-			value := rate(service, at, noise)
-			if _, err := fmt.Fprintf(w, "%s{service=\"%s\"} %.3f %d\n", metric, service, value, at.Unix()); err != nil {
-				return err
+		for i, service := range services {
+			// Seeded per series index rather than from the clock, so two runs
+			// over the same span differ only in where the span sits.
+			// Reproducibility is the property wanted, which is what a weak
+			// generator gives. The same seed per metric is deliberate: the
+			// good half has to be the same traffic as the total half, or the
+			// ratio between them is noise over noise.
+			noise := rand.New(rand.NewPCG(uint64(i), 0)) //nolint:gosec
+			for at := start; !at.After(end); at = at.Add(step) {
+				value := rate(service, at, noise)
+				if metric.good {
+					value *= 1 - errorRatio(at)
+				}
+				if _, err := fmt.Fprintf(w, "%s{service=\"%s\"} %.3f %d\n",
+					metric.name, service, value, at.Unix()); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
 	_, err := fmt.Fprint(w, "# EOF\n")
 	return err
+}
+
+// errorRatio is the fraction of requests that failed at an instant.
+//
+// Quiet at a tenth of what a 99.9% objective allows, with one bad hour every
+// third day at twenty times the allowance. Both halves matter: a budget that
+// burns all month and a budget that never burns are each a report in which an
+// overlap of zero proves nothing about the detector.
+func errorRatio(at time.Time) float64 {
+	if at.Day()%3 == 0 && at.Hour() == 2 {
+		return 0.02
+	}
+	return 0.0001
 }
 
 // rate is a daily sine around a baseline, lower at the weekend, with enough

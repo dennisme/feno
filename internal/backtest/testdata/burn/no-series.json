@@ -1,0 +1,6 @@
+{
+  "comment": "The burn query matched nothing, so the overlap is not computed rather than zero: an SLO whose recording the server never had is the absence of data and not a verdict about the detector.",
+  "start": "2026-09-04T06:00:00Z",
+  "step": "1h",
+  "series": []
+}

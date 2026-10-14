@@ -1,0 +1,19 @@
+{
+  "comment": "The burn signal over the reported window, as a burn rate: above one the budget is being spent faster than the objective allows. Burning at 12:00 and 13:00, which are two of the three hours somebody was paged in multi-series.json, and again at 20:00 when nothing was firing at all. One instant carries no sample and one divides by zero, which are the SLI not being scraped and the SLI being uncomputable rather than a budget that was quiet.",
+  "start": "2026-09-04T06:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {},
+      "segments": [
+        {"repeat": 6, "value": 0.2},
+        {"repeat": 2, "value": 2.5},
+        {"repeat": 6, "value": 0.2},
+        {"repeat": 1, "value": 2.5},
+        {"repeat": 8, "value": 0.2},
+        {"repeat": 1, "undefined": true},
+        {"repeat": 1, "absent": true}
+      ]
+    }
+  ]
+}

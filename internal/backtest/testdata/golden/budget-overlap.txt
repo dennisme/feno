@@ -1,0 +1,33 @@
+checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 samples minimum
+  query                 sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  step                  1h, for 2h
+  requires              seasonal decomposition
+  reported window       2026-09-04T06:00:00Z .. 2026-09-05T06:00:00Z  (24h, 25 instants)
+  history read          2026-09-01T00:00:00Z .. 2026-09-05T06:00:00Z  (102h, warm-up 78h)
+  read cost             1 request, 309 points, 3 series
+
+  paging episodes       2, plus 0 flaps that crossed the band without reaching for
+  series firing time    5h  (20.83% of the reported window, summed over series)
+  paged wall clock      3h  (12.50% of the reported window)
+  peak concurrent       2 series firing at 2026-09-04T11:00:00Z
+  longest episode       3h from 2026-09-04T11:00:00Z  {instance="web-2"}
+  without a verdict     0 of 75 series-instants: 0 cold, 0 absent, 0 undefined
+  budget overlap        2 of 2 paging episodes coincided with the budget burning
+                        2h of 3h paged wall clock  (66.67%)
+  linked SLO            checkout-availability, objective 99.9%
+  budget burning        3 of 25 instants: 1 absent, 1 undefined
+  burn signal           (1 - ((sum(rate(http_requests_total{service="checkout",code!~"5.."}[5m]))) / (sum(rate(http_requests_total{service="checkout"}[5m]))))) / (1 - 0.999) > 1
+
+  series              firing  flaps  firing time  ratio   cold  absent  undefined  coincident
+  {instance="web-2"}  1       0      3h           12.50%  0     0       0          2h
+  {instance="web-1"}  1       0      2h           8.33%   0     0       0          1h
+  {instance="web-3"}  0       0      0s           0.00%   0     0       0          0s
+
+  Every ratio above divides by the reported window. Dividing by the span
+  the samples cover, or by the window times the series count, reads lower
+  and flatters the detector: the first hides a series that was missing,
+  the second shrinks every time the query matches another instance.
+
+  The budget overlap is the one exception: it divides by the time somebody
+  was paged, because the question behind it is what fraction of the pages
+  landed on an error budget that was actually being spent.

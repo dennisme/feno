@@ -75,6 +75,11 @@ skip with a message naming the environment variables they want.
 FENO_PROMETHEUS_URL=http://localhost:9090 go test -tags integration ./internal/backtest/
 ```
 
+The budget overlap's integration test wants two more, `FENO_SLO_GOOD_QUERY`
+and `FENO_SLO_TOTAL_QUERY`, which are the two halves of an SLO ratio over the
+same server. `just backtest-history` passes all of them against the generated
+month.
+
 ## Layout
 
 What exists:
@@ -83,13 +88,13 @@ What exists:
 | --- | --- |
 | `cmd/feno` | CLI. Command dispatch and exit codes |
 | `internal/buildinfo` | What a binary is: version, commit, build time |
-| `internal/spec` | The `AnomalyDetector` kind, the loader over a walked tree of mixed OpenSLO and detector documents, and validation. Imports the OpenSLO go-sdk for its kinds rather than restating them |
+| `internal/spec` | The `AnomalyDetector` kind, the loader over a walked tree of mixed OpenSLO and detector documents, and validation. Resolves both of a detector's references, `metricSourceRef` to a `DataSource` and `sloRef` to an `SLO` with its indicator followed. Imports the OpenSLO go-sdk for its kinds rather than restating them |
 | `internal/prometheus` | Range-query reader over `/api/v1/query_range`, chunked and stitched |
 | `internal/detect` | The band representation. One implementation, compiled by every target and evaluated by the backtest, because a second one makes the backtest stop predicting production |
-| `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, and declares what the target cannot express |
-| `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for` |
+| `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, compiles a linked SLO's objective into the burn query the budget overlap is read from, and declares what the target cannot express |
+| `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for`, and the intersection of those episodes with another timeline |
 | `internal/config` | `feno.yaml`: the repository's targets and its noise budget, resolved per detector from the files above it with the stricter limit binding. A limit is a pointer, because zero is a budget somebody means |
-| `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the aggregation across one query's series, and the report a person reads |
+| `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the second read the budget overlap intersects with, the aggregation across one query's series, and the report a person reads |
 | `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |
 | `history/` | A Prometheus over a generated month of TSDB blocks, for the backtest's read against a range past the resolution limit |
 | `docs/` | The published site |
@@ -148,7 +153,8 @@ Never bypass a pre-commit hook. Do not commit unless asked to.
 
 `feno version`, `feno generate` and `feno backtest` run. A detector document
 loads into a `detect.Spec`, compiles into a Prometheus rule file, and replays
-over history into a report that is held to the budget in `feno.yaml`; what is
-missing is the ClickHouse target and `feno suggest`. The README `Status` and
+over history into a report that is held to the budget in `feno.yaml` and says
+how much of its paging coincided with the error budget of the SLO its
+`sloRef` names; what is missing is the ClickHouse target and `feno suggest`. The README `Status` and
 `Build order` sections say what is next; keep them accurate when you land
 something they describe.

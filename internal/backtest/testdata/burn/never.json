@@ -1,0 +1,11 @@
+{
+  "comment": "A budget that never burned over the window, which is the report that says delete the detector.",
+  "start": "2026-09-04T06:00:00Z",
+  "step": "1h",
+  "series": [
+    {
+      "labels": {},
+      "segments": [{"repeat": 25, "value": 0.2}]
+    }
+  ]
+}

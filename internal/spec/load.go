@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -56,8 +55,9 @@ var (
 )
 
 // Detector is a loaded [AnomalyDetector]: the document as authored, the file
-// it came from so that anything downstream can say where, and the DataSource
-// its metricSourceRef named.
+// it came from so that anything downstream can say where, and what its two
+// references named: the DataSource behind metricSourceRef and the SLO behind
+// sloRef.
 type Detector struct {
 	AnomalyDetector
 
@@ -67,6 +67,10 @@ type Detector struct {
 	// DataSource is what metricSourceRef resolved to, and is nil when the
 	// metric source declares its own type inline.
 	DataSource *v1.DataSource
+
+	// SLO is what sloRef resolved to, and is nil when the detector names no
+	// SLO. A nil here is the detector a report cannot tie to an error budget.
+	SLO *SLO
 }
 
 // SourceType is the datasource type the query runs against: the resolved
@@ -106,7 +110,7 @@ type Bundle struct {
 // decoder and validator, as the bytes the author wrote. Ours are decoded
 // here, strictly, so that a misspelled field is an error rather than a
 // default. Names are then checked for duplicates across the whole set and
-// every metricSourceRef is resolved, both of which need all the files and so
+// every reference is resolved, both of which need all the files and so
 // cannot happen per document.
 func Load(paths ...string) (Bundle, error) {
 	files, err := collect(paths)
@@ -118,6 +122,8 @@ func Load(paths ...string) (Bundle, error) {
 		bundle    Bundle
 		seen      = map[string]string{} // kind/name -> file that declared it
 		sources   = map[string]*v1.DataSource{}
+		slos      = map[string]*v1.SLO{}
+		slis      = map[string]*v1.SLI{}
 		detectors []Detector
 	)
 
@@ -169,8 +175,13 @@ func Load(paths ...string) (Bundle, error) {
 					if err := claim(seen, doc, object.GetKind().String(), object.GetName()); err != nil {
 						return Bundle{}, err
 					}
-					if source, ok := object.(v1.DataSource); ok {
-						sources[source.Metadata.Name] = &source
+					switch typed := object.(type) {
+					case v1.DataSource:
+						sources[typed.Metadata.Name] = &typed
+					case v1.SLO:
+						slos[typed.Metadata.Name] = &typed
+					case v1.SLI:
+						slis[typed.Metadata.Name] = &typed
 					}
 				}
 				bundle.Objects = append(bundle.Objects, objects...)
@@ -195,21 +206,19 @@ func Load(paths ...string) (Bundle, error) {
 		if !ok {
 			// A name that exists under some other kind is a different
 			// mistake from a name that exists nowhere, and the author fixes
-			// the two differently, so they are reported differently. The
-			// keys are sorted because a map would otherwise name whichever
-			// match it reached first.
-			for _, key := range slices.Sorted(maps.Keys(seen)) {
-				kind, name, _ := strings.Cut(key, "/")
-				if name != ref {
-					continue
-				}
+			// the two differently, so they are reported differently.
+			if kind, where, found := declared(seen, ref); found {
 				return Bundle{}, fmt.Errorf("%s: detector %q references %q, which is a %s declared in %s: %w",
-					detectors[i].File, detectors[i].Metadata.Name, ref, kind, seen[key], ErrRefKind)
+					detectors[i].File, detectors[i].Metadata.Name, ref, kind, where, ErrRefKind)
 			}
 			return Bundle{}, fmt.Errorf("%s: detector %q references %q: %w",
 				detectors[i].File, detectors[i].Metadata.Name, ref, ErrUnresolvedRef)
 		}
 		detectors[i].DataSource = dataSource
+	}
+
+	if err := link(detectors, slos, slis, seen); err != nil {
+		return Bundle{}, err
 	}
 
 	bundle.Detectors = detectors

@@ -409,7 +409,7 @@ func TestAnalyseErrors(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewWindow: %v", err)
 		}
-		if _, err := Analyse(d, w, &prometheus.Result{}); !errors.Is(err, ErrWarmUp) {
+		if _, err := Analyse(d, w, &prometheus.Result{}, nil); !errors.Is(err, ErrWarmUp) {
 			t.Errorf("error = %v, want %v", err, ErrWarmUp)
 		}
 	})
@@ -417,7 +417,7 @@ func TestAnalyseErrors(t *testing.T) {
 	t.Run("a datasource this reader does not speak", func(t *testing.T) {
 		d := load(t, "clickhouse.yaml")
 		w := window(t, d)
-		if _, err := Analyse(d, w, &prometheus.Result{}); !errors.Is(err, ErrSourceType) {
+		if _, err := Analyse(d, w, &prometheus.Result{}, nil); !errors.Is(err, ErrSourceType) {
 			t.Errorf("error = %v, want %v", err, ErrSourceType)
 		}
 	})
@@ -431,11 +431,36 @@ func TestReport(t *testing.T) {
 		name     string
 		detector string
 		history  string
+		burn     string
 	}{
 		{
 			name:     "multi-series.txt",
 			detector: "daily-seasonal.yaml",
 			history:  "multi-series.json",
+		},
+		{
+			// The same history and the same band, linked to an SLO: two of
+			// the two pages landed on a budget that was being spent.
+			name:     "budget-overlap.txt",
+			detector: "linked.yaml",
+			history:  "multi-series.json",
+			burn:     "two-of-three.json",
+		},
+		{
+			// The report this number exists to produce: everything fired and
+			// none of it coincided with anything.
+			name:     "budget-never-burned.txt",
+			detector: "linked.yaml",
+			history:  "multi-series.json",
+			burn:     "never.json",
+		},
+		{
+			// The zero that is not a finding, said differently so that nobody
+			// deletes a detector over a burn query that answered nothing.
+			name:     "budget-unmeasured.txt",
+			detector: "linked.yaml",
+			history:  "multi-series.json",
+			burn:     "no-series.json",
 		},
 		{
 			name:     "nothing-fired.txt",
@@ -456,7 +481,12 @@ func TestReport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			report := analyse(t, tt.detector, tt.history)
+			var report *Report
+			if tt.burn == "" {
+				report = analyse(t, tt.detector, tt.history)
+			} else {
+				report = analyse(t, tt.detector, tt.history, tt.burn)
+			}
 			var out bytes.Buffer
 			if err := report.Write(&out); err != nil {
 				t.Fatalf("writing the report: %v", err)

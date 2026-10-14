@@ -1,0 +1,30 @@
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-availability
+spec:
+  thresholdMetric:
+    metricSource:
+      type: Prometheus
+      spec:
+        query: sum(rate(http_requests_total[5m]))
+---
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  sloRef: checkout-availability
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total[5m]))
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: balanced

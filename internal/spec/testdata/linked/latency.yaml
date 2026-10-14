@@ -1,0 +1,45 @@
+# The other shape: an SLO carrying its indicator inline, and a detector that
+# links to it. Nothing downstream should have to know which of the two it got.
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-latency
+spec:
+  service: checkout
+  budgetingMethod: Occurrences
+  indicator:
+    metadata:
+      name: checkout-latency
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m])))
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - op: lt
+      value: 0.5
+      target: 0.99
+---
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-latency-shape
+spec:
+  sloRef: checkout-latency
+  indicator:
+    metadata:
+      name: checkout-latency
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m])))
+  detection:
+    strategy: adaptive
+    class: latency
+    sensitivity: balanced
