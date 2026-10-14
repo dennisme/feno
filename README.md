@@ -20,10 +20,10 @@ never checked rather than that it held.
 feno backtest -f detectors/ --url http://mimir/prometheus --from -30d
 ```
 
-The budget lives in `feno.yaml` beside the specifications, found by walking up
-from them, because a limit somebody can drop by editing the workflow that
-checks it is not a limit. One default for the repository, and a detector that
-needs its own says so in a line:
+The budget lives in `feno.yaml` beside the specifications, because a limit
+somebody can drop by editing the workflow that checks it is not a limit. One
+default for the repository, and a detector that needs its own says so in a
+line:
 
 ```yaml
 targets:
@@ -49,6 +49,33 @@ with, so the band is compiled against what the server has rather than against
 a flag somebody had to know the answer to. Without it the compilation is
 offline and `--experimental-functions` decides, which is what keeps the drift
 gate working on a fork pull request with no path to production.
+
+Each detector is held to the strictest limit in the files above it, from the
+path `-f` names down to its own directory, so a repository with a team per
+directory gives each team a `feno.yaml` it owns and nobody can loosen the
+ceiling above them:
+
+```text
+alerting/
+  feno.yaml                   # the ceiling. maxEpisodes: 4
+  teams/checkout/
+    feno.yaml                 # maxEpisodes: 2, and may not say 12
+    detectors/
+  teams/search/
+    feno.yaml
+    detectors/
+```
+
+```console
+$ feno backtest -f alerting/ --url http://mimir/prometheus --from -14d
+checkout-request-rate: 10 paging episodes, limit 2 (alerting/teams/checkout/feno.yaml)
+search-latency: 10 paging episodes, limit 4 (alerting/feno.yaml)
+```
+
+A finding names the file that set the limit it broke, because in a repository
+with a budget per team that file is often not the one the author is looking
+at. `-f` walks the tree, and `-config` names one file instead and reads
+nothing else.
 
 `-o` is the target's `output` in `feno.yaml` when it is left off, read
 relative to the file that declared it.

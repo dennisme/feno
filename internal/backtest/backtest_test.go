@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,6 +340,7 @@ func TestThresholds(t *testing.T) {
 		name       string
 		thresholds Thresholds
 		findings   int
+		inFinding  string
 	}{
 		{
 			name:       "nothing set is nothing exceeded",
@@ -369,6 +371,18 @@ func TestThresholds(t *testing.T) {
 			thresholds: Thresholds{MaxEpisodes: 0, MaxFiringRatio: 0},
 			findings:   2,
 		},
+		{
+			// Over budget is not actionable until the reader knows which
+			// file set the budget, which in a repository with a budget per
+			// team is not the one they are looking at.
+			name: "the file that set the limit is named",
+			thresholds: Thresholds{
+				MaxEpisodes: 0, MaxFiringRatio: -1,
+				EpisodesFrom: "teams/checkout/feno.yaml",
+			},
+			findings:  1,
+			inFinding: "(teams/checkout/feno.yaml)",
+		},
 	}
 
 	for _, tt := range tests {
@@ -376,6 +390,9 @@ func TestThresholds(t *testing.T) {
 			got := report.Exceeded(tt.thresholds)
 			if len(got) != tt.findings {
 				t.Errorf("findings = %d (%v), want %d", len(got), got, tt.findings)
+			}
+			if tt.inFinding != "" && !strings.Contains(strings.Join(got, "\n"), tt.inFinding) {
+				t.Errorf("findings = %v, want one to contain %q", got, tt.inFinding)
 			}
 		})
 	}

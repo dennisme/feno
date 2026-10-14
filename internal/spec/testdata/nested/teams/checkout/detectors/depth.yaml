@@ -1,0 +1,22 @@
+# A detector whose metric source declares its own type rather than naming a
+# DataSource, with no seasonality and an authored coverage policy.
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-depth
+spec:
+  indicator:
+    metadata:
+      name: annotator-lag
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(kafka_consumergroup_lag{consumergroup="annotator"})
+  detection:
+    strategy: adaptive
+    class: saturation
+    sensitivity: balanced
+    window: 30m
+    minCoverage: 0.5

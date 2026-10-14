@@ -516,6 +516,13 @@ func (r *Report) Ratio(d time.Duration) float64 {
 type Thresholds struct {
 	MaxEpisodes    int
 	MaxFiringRatio float64
+
+	// EpisodesFrom and RatioFrom are the file that set each limit, named in
+	// the finding it produces. A repository with a budget per team holds a
+	// detector to limits from more than one file, so "over budget" without
+	// the file is a sentence a reader cannot act on.
+	EpisodesFrom string
+	RatioFrom    string
 }
 
 // NoThresholds is every limit unset.
@@ -526,14 +533,23 @@ var NoThresholds = Thresholds{MaxEpisodes: -1, MaxFiringRatio: -1}
 func (r *Report) Exceeded(t Thresholds) []string {
 	var out []string
 	if t.MaxEpisodes >= 0 && r.Episodes() > t.MaxEpisodes {
-		out = append(out, fmt.Sprintf("%s: %d paging episodes, limit %d",
-			r.Detector, r.Episodes(), t.MaxEpisodes))
+		out = append(out, fmt.Sprintf("%s: %d paging episodes, limit %d%s",
+			r.Detector, r.Episodes(), t.MaxEpisodes, from(t.EpisodesFrom)))
 	}
 	if ratio := r.Ratio(r.PagedTime()); t.MaxFiringRatio >= 0 && ratio > t.MaxFiringRatio {
-		out = append(out, fmt.Sprintf("%s: paged for %s of the window, limit %s",
-			r.Detector, percent(ratio), percent(t.MaxFiringRatio)))
+		out = append(out, fmt.Sprintf("%s: paged for %s of the window, limit %s%s",
+			r.Detector, percent(ratio), percent(t.MaxFiringRatio), from(t.RatioFrom)))
 	}
 	return out
+}
+
+// from is the file a limit came from, as a finding carries it, and nothing
+// when the caller had no file to name.
+func from(file string) string {
+	if file == "" {
+		return ""
+	}
+	return " (" + file + ")"
 }
 
 // Requirements is what the band needs from whatever will evaluate it, as the

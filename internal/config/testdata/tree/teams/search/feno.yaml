@@ -1,0 +1,5 @@
+budget:
+  maxFiringRatio: 0.01
+  detectors:
+    search-latency:
+      maxEpisodes: 9

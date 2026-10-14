@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	v1 "github.com/OpenSLO/go-sdk/pkg/openslo/v1"
 	"github.com/OpenSLO/go-sdk/pkg/openslosdk"
 	"sigs.k8s.io/yaml"
+
+	"github.com/dennisme/feno/internal/config"
 )
 
 var (
@@ -93,9 +96,11 @@ type Bundle struct {
 // Load reads every YAML document under the given paths, which may be files
 // or directories.
 //
-// A directory is read one level deep rather than walked. A flag for
-// recursion is a small change when somebody nests their specifications by
-// service; guessing now which of the two a team wants is not.
+// A directory is walked, so a repository that nests its specifications by
+// team or by service is loaded by naming the tree rather than every leaf. It
+// is also what the noise budget's scope is resolved against: internal/config
+// walks up from a detector's own file and stops at the path named here, so a
+// tree that cannot be named cannot have a budget above its leaves.
 //
 // Documents are dispatched on apiVersion and kind. OpenSLO's go to go-sdk's
 // decoder and validator, as the bytes the author wrote. Ours are decoded
@@ -239,22 +244,45 @@ func collect(paths []string) ([]string, error) {
 			files = append(files, path)
 			continue
 		}
-		entries, err := os.ReadDir(path)
+		walked, err := yamlUnder(path)
 		if err != nil {
 			return nil, err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || !isYAML(entry.Name()) {
-				continue
-			}
-			files = append(files, filepath.Join(path, entry.Name()))
-		}
+		files = append(files, walked...)
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("%v: %w", paths, ErrNoFiles)
 	}
 	slices.Sort(files)
 	return files, nil
+}
+
+// yamlUnder is every YAML file in a tree.
+//
+// A directory whose name starts with a dot is skipped whole. The one that
+// matters is .git, which holds enough YAML to make an error message about a
+// specification point inside a packfile.
+func yamlUnder(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != root && strings.HasPrefix(entry.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		// feno.yaml is reserved in a specification tree: it is the targets
+		// and the noise budget, read by internal/config, and a walk that
+		// collected it would refuse the whole tree as an unknown kind.
+		if isYAML(entry.Name()) && entry.Name() != config.Filename {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
 }
 
 func isYAML(name string) bool {
