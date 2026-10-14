@@ -94,3 +94,30 @@ jobs:
 
       - name: Probe two real Prometheus servers
         run: just smoketest
+
+  # The backtest's one test that talks to a server. It needs a month of
+  # history, which is generated and imported into TSDB blocks by the recipe
+  # rather than scraped, so this job depends on no datasource anybody has to
+  # grant access to and runs on a fork pull request like the smoketest.
+  backtest-history:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install pinned promtool
+        uses: jdx/mise-action@v5
+        with:
+          install_args: promtool
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Backtest against a month of history
+        run: just backtest-history

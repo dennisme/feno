@@ -1,0 +1,35 @@
+# One Prometheus serving a month of generated history.
+#
+# The storage path is blocks written by `promtool tsdb create-blocks-from
+# openmetrics`, not a scrape: what the backtest integration test needs is a
+# range longer than the server's resolution limit, and waiting for a scrape to
+# accumulate one is a month per run.
+#
+# Retention has to be stated. It defaults to 15d, and the test asks for 30 days
+# of reported window plus the band's lookback, so a default server deletes the
+# oldest blocks on startup and the read comes back absent for the part of the
+# window that matters most.
+#
+# The image moves with the promtool pin in .tool-versions, the same way
+# smoketest/compose.yaml does, because the tool that writes the blocks and the
+# server that reads them are one release.
+#
+# The image's default configuration scrapes this server itself, which is left
+# alone: it costs one series per metric and it is how the chunking can be read
+# back, as prometheus_http_requests_total{handler="/api/v1/query_range"}.
+services:
+  history:
+    image: prom/prometheus:v3.15.0
+    ports:
+      - "19092:9090"
+    volumes:
+      - ./data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=60d
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30

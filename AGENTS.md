@@ -36,6 +36,7 @@ just build            # go build ./...
 just coverage         # coverage across the tree
 just promtool         # promtool check rules over every generated rule file
 just smoketest        # the capability probe against two real Prometheus servers
+just backtest-history # the backtest against a Prometheus holding a month of history
 just markdownlint     # markdownlint-cli2 over the docs
 just docs-serve       # preview the documentation site locally
 just init             # mise tool versions and pre-commit hooks
@@ -81,6 +82,8 @@ What exists:
 | `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, and declares what the target cannot express |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for` |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the aggregation across one query's series, and the report a person reads |
+| `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |
+| `history/` | A Prometheus over a generated month of TSDB blocks, for the backtest's read against a range past the resolution limit |
 | `docs/` | The published site |
 | `spec.md` | Design, research, and the decisions already settled |
 

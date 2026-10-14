@@ -138,5 +138,43 @@ smoketest:
 
     echo "smoketest: both forms compiled from what the server answered"
 
+# Prove a chunked range query lands on the grid the band is evaluated against.
+#
+# Not part of `check`, because it needs Docker. What it covers is the one
+# thing no fixture can be evidence for: a /api/v1/query_range longer than the
+# server's resolution limit, split into chunks and stitched back together,
+# whose samples have to carry the exact timestamps internal/detect matches
+# instants against. A grid off by a millisecond reports nothing but absence.
+#
+# The history is generated and imported on every run rather than committed,
+# because the window the test asks for ends now: yesterday's blocks are
+# outside it. Data is wiped at the start rather than the end, so a failed run
+# leaves a server somebody can query.
+backtest-history:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; run 'just init'"; exit 1; }
+
+    compose="docker compose -f history/compose.yaml"
+    trap '$compose down --volumes >/dev/null 2>&1 || true' EXIT
+    $compose down --volumes >/dev/null 2>&1 || true
+
+    # 0777 because the image runs as nobody and the blocks are a bind mount
+    # owned by whoever ran this.
+    rm -rf history/data
+    mkdir -p history/data
+    chmod 0777 history/data
+
+    samples=$(mktemp)
+    env -u GOROOT GOTOOLCHAIN=auto go run ./history/seed >"$samples"
+    promtool tsdb create-blocks-from openmetrics --max-block-duration=200h "$samples" history/data
+    rm -f "$samples"
+
+    $compose up -d --wait
+
+    FENO_PROMETHEUS_URL=http://localhost:19092 \
+    FENO_PROMETHEUS_QUERY=feno_requests_per_second \
+        env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration ./internal/backtest/
+
 # Everything CI runs, in the order CI runs it.
 check: lint build test promtool markdownlint
