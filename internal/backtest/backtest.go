@@ -86,20 +86,36 @@
 //     past one hundred percent, and that is the honest reading: three
 //     instances firing all month is three hundred percent of a month of pages.
 //
-// # Error budget overlap is a seam here, not a number
+// # Error budget overlap, and the two reads it is an intersection of
 //
-// The README promises overlap with an error budget actually burning, and it is
-// the most useful number on the list: an anomaly episode that never coincided
-// with a burn alert is a candidate for deletion. It is not computed in this
-// slice and is not quietly dropped either. What it needs is a burn-rate query
-// per SLO, which means reading the OpenSLO half of the directory that
-// internal/spec already keeps in [spec.Bundle.Objects], compiling the SLO's
-// objective and windows into a second query, a second range read, and an
-// intersection of the firing timeline below with that query's. The second
-// query is the part that is not written: an SLO's burn rate is sloth's and
-// pyrra's output, not this tool's, so the choice is between generating it and
-// being handed it. The report names the gap in its own output so that a reader
-// cannot mistake a missing number for a zero.
+// An anomaly episode that never coincided with an error budget actually
+// burning is a candidate for deletion, which is the most useful thing this
+// report says. It is an intersection of two timelines, so it needs a second
+// read: internal/rules compiles the SLO a detector's `sloRef` names into a
+// burn query, [Run] reads it over the reported window at the same step, and
+// internal/episode intersects it with the firing episodes.
+//
+// Three choices in that make the number mean what it says.
+//
+// The burn signal is compiled from the SLO rather than read out of sloth's or
+// pyrra's recording rules. Their output is the same quantity under names this
+// tool would have to guess, and a repository that keeps SLOs in git has
+// already declared everything the query needs. Nothing has to be deployed for
+// the overlap to be computable, which is the same property that makes the
+// rest of the backtest a read-only command.
+//
+// The second read covers the reported window and not the full read span. The
+// band's lookback is history a detector needs before it has a verdict at all,
+// and the budget either was or was not burning at an instant, so there is
+// nothing in the warm-up to intersect. The step is the same value, which is
+// what puts the two timelines on the same instants: two reads on grids offset
+// from each other intersect in nothing, and nothing is exactly what a useless
+// detector looks like.
+//
+// A detector that links to no SLO reports that it links to none. The overlap
+// is not zero in that case, and the report says so in words, because an
+// overlap of zero over a budget that was read is the finding and the two must
+// not read alike.
 //
 // # What is not tested
 //
@@ -247,6 +263,33 @@ type SeriesReport struct {
 	Counts   Counts
 	Episodes []episode.Episode
 	Summary  episode.Summary
+
+	// Overlaps is each of this series' episodes against the burn signal, in
+	// the same order as Episodes. It is empty for a detector linked to no
+	// SLO, which is not an overlap of zero: see [Budget].
+	Overlaps []episode.Overlap
+}
+
+// Coincident is how much of this series' firing time fell on an instant where
+// the budget was burning.
+func (s SeriesReport) Coincident() time.Duration {
+	var d time.Duration
+	for _, overlap := range s.Overlaps {
+		d += overlap.Coincident
+	}
+	return d
+}
+
+// Touched is how many of this series' paging episodes coincided with the
+// budget burning at all.
+func (s SeriesReport) Touched() int {
+	var n int
+	for _, overlap := range s.Overlaps {
+		if overlap.Touched() {
+			n++
+		}
+	}
+	return n
 }
 
 // Report is what a person reads.
@@ -275,15 +318,25 @@ type Report struct {
 	PagedInstants int
 	Peak          int
 	PeakAt        time.Time
+
+	// Budget is the SLO this detector was judged against, and is nil when it
+	// names none.
+	Budget *Budget
+
+	// CoincidentInstants is how many of the paged instants were also instants
+	// where the budget was burning.
+	CoincidentInstants int
 }
 
 // Analyse evaluates the band over history and groups the breaches, one series
 // at a time, and aggregates the result.
 //
-// result is whatever the reader returned for the window's full read span. It
-// is a pure function from there on, which is what makes the report testable
-// against fixtures rather than against a server.
-func Analyse(d spec.Detector, w Window, result *prometheus.Result) (*Report, error) {
+// result is whatever the reader returned for the window's full read span, and
+// burning is what the burn query returned over the reported window for the
+// SLO the detector links to, or nil when it links to none. It is a pure
+// function from there on, which is what makes the report testable against
+// fixtures rather than against a server.
+func Analyse(d spec.Detector, w Window, result, burning *prometheus.Result) (*Report, error) {
 	if got := d.SourceType(); got != rules.SourceType {
 		return nil, fmt.Errorf("detector %q: %q: %w", d.Metadata.Name, got, ErrSourceType)
 	}
@@ -323,6 +376,12 @@ func Analyse(d spec.Detector, w Window, result *prometheus.Result) (*Report, err
 	opts := episode.Options{Step: w.Step, For: hold}
 	instants := detect.Range{Start: w.Start, End: w.End, Step: w.Step}
 
+	linked, timeline, err := budget(d, w, burning)
+	if err != nil {
+		return nil, err
+	}
+	report.Budget = linked
+
 	for _, series := range result.Series {
 		results, err := detect.Evaluate(band, instants, series.Points)
 		if err != nil {
@@ -332,6 +391,13 @@ func Analyse(d spec.Detector, w Window, result *prometheus.Result) (*Report, err
 		if err != nil {
 			return nil, fmt.Errorf("series %s: %w", series.Key, err)
 		}
+		var overlaps []episode.Overlap
+		if linked != nil {
+			overlaps, err = episode.Overlaps(episodes, timeline, w.Step)
+			if err != nil {
+				return nil, fmt.Errorf("series %s: %w", series.Key, err)
+			}
+		}
 
 		report.Series = append(report.Series, SeriesReport{
 			Key:      series.Key,
@@ -339,6 +405,7 @@ func Analyse(d spec.Detector, w Window, result *prometheus.Result) (*Report, err
 			Counts:   count(results),
 			Episodes: episodes,
 			Summary:  episode.Summarize(episodes),
+			Overlaps: overlaps,
 		})
 	}
 
@@ -352,8 +419,37 @@ func Analyse(d spec.Detector, w Window, result *prometheus.Result) (*Report, err
 		return a.Key < b.Key
 	})
 
-	report.PagedInstants, report.Peak, report.PeakAt = concurrency(w, report.Series)
+	firing := concurrency(w, report.Series)
+	report.PagedInstants, report.Peak, report.PeakAt = paging(w, firing)
+	report.CoincidentInstants = coincident(firing, timeline)
 	return report, nil
+}
+
+// budget is the burn signal for the SLO a detector links to, compiled and
+// read onto the window's grid, with the timeline its episodes are intersected
+// with. Both are nil for a detector that links to no SLO.
+func budget(d spec.Detector, w Window, burning *prometheus.Result) (*Budget, []episode.Sample, error) {
+	if d.SLO == nil {
+		if burning != nil {
+			return nil, nil, fmt.Errorf("detector %q names no SLO and was handed a burn signal: %w",
+				d.Metadata.Name, ErrBurnRead)
+		}
+		return nil, nil, nil
+	}
+	if burning == nil {
+		return nil, nil, fmt.Errorf("detector %q is linked to SLO %q and no burn signal was read: %w",
+			d.Metadata.Name, d.SLO.Metadata.Name, ErrBurnRead)
+	}
+
+	burn, err := rules.BurnQuery(d)
+	if err != nil {
+		return nil, nil, err
+	}
+	timeline, counts, err := burnTimeline(w, burn, burning)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &Budget{Burn: burn, Counts: counts}, timeline, nil
 }
 
 // Run reads the history a detector needs and analyses it.
@@ -378,7 +474,24 @@ func Run(ctx context.Context, client *prometheus.Client, d spec.Detector, opts O
 	if err != nil {
 		return nil, fmt.Errorf("detector %q: %w", d.Metadata.Name, err)
 	}
-	return Analyse(d, window, result)
+
+	// The burn signal is read over the reported window rather than the full
+	// span, because the warm-up holds no episode to intersect, and at the
+	// same step so the two timelines land on the same instants. A detector
+	// linked to no SLO reads nothing: there is no query to ask.
+	var burning *prometheus.Result
+	if d.SLO != nil {
+		burn, err := rules.BurnQuery(d)
+		if err != nil {
+			return nil, err
+		}
+		burning, err = client.QueryRange(ctx, burn.Query, window.Start, window.End, window.Step)
+		if err != nil {
+			return nil, fmt.Errorf("detector %q, SLO %q: %w", d.Metadata.Name, burn.SLO, err)
+		}
+	}
+
+	return Analyse(d, window, result, burning)
 }
 
 // count tallies the answers over one series' reported instants.
@@ -400,13 +513,12 @@ func count(results []detect.Result) Counts {
 }
 
 // concurrency walks every firing episode onto the window's grid and reports
-// how many instants had anybody being paged, the most series firing at once,
-// and when that peak was.
+// how many series were firing at each instant.
 //
 // Only the firing part of an episode is counted, from the instant it survived
 // For to the one it ended at, because that is the span an alert would have
 // been at Alertmanager. A flap contributes nothing: nobody was woken.
-func concurrency(w Window, series []SeriesReport) (paged, peak int, peakAt time.Time) {
+func concurrency(w Window, series []SeriesReport) []int {
 	firing := make([]int, w.Instants())
 	for _, s := range series {
 		for _, e := range s.Episodes {
@@ -421,6 +533,12 @@ func concurrency(w Window, series []SeriesReport) (paged, peak int, peakAt time.
 		}
 	}
 
+	return firing
+}
+
+// paging is how many instants had anybody being paged, the most series firing
+// at once, and when that peak was.
+func paging(w Window, firing []int) (paged, peak int, peakAt time.Time) {
 	for i, n := range firing {
 		if n == 0 {
 			continue
@@ -431,6 +549,26 @@ func concurrency(w Window, series []SeriesReport) (paged, peak int, peakAt time.
 		}
 	}
 	return paged, peak, peakAt
+}
+
+// coincident is how many of the paged instants were also burning.
+//
+// It is counted here rather than summed from the per-series overlaps because
+// it is the wall clock question: two instances firing in the same burning
+// hour is one hour of pages that landed on something real, and summing their
+// overlaps would say two. The two slices are the same length, both being one
+// entry per reported instant.
+func coincident(firing []int, timeline []episode.Sample) int {
+	if timeline == nil {
+		return 0
+	}
+	var n int
+	for i, sample := range timeline {
+		if firing[i] > 0 && sample.Breaching {
+			n++
+		}
+	}
+	return n
 }
 
 // Episodes is how many separate times somebody would have been paged, summed

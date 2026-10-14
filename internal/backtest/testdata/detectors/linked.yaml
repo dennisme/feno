@@ -1,0 +1,65 @@
+# The same detector as daily-seasonal.yaml, linked to an SLO, so one history
+# fixture serves both and the only difference in the report is the overlap.
+#
+# The SLO is a ratio with an occurrence target, which is the shape sloth and
+# pyrra generate burn-rate rules from, and its indicator is a separate SLI so
+# that the fixture exercises an indicatorRef rather than the easier inline
+# form.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-availability
+spec:
+  ratioMetric:
+    counter: true
+    good:
+      metricSource:
+        type: Prometheus
+        spec:
+          query: sum(rate(http_requests_total{service="checkout",code!~"5.."}[5m]))
+    total:
+      metricSource:
+        type: Prometheus
+        spec:
+          query: sum(rate(http_requests_total{service="checkout"}[5m]))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-availability
+spec:
+  service: checkout
+  indicatorRef: checkout-availability
+  budgetingMethod: Occurrences
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - target: 0.999
+---
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  description: Checkout request volume, daily seasonal, judged against the availability SLO
+  sloRef: checkout-availability
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
+  detection:
+    strategy: adaptive
+    seasonality:
+      - daily
+    class: requests
+    sensitivity: balanced
+    window: 6h
+  alerting:
+    for: 2h
+    runbook: https://runbooks.example.com/checkout-anomaly

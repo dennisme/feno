@@ -77,6 +77,51 @@ with a budget per team that file is often not the one the author is looking
 at. `-f` walks the tree, and `-config` names one file instead and reads
 nothing else.
 
+A detector that names the SLO it protects gets the number the report exists
+for: how much of its paging coincided with that SLO's error budget actually
+being spent.
+
+```yaml
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-request-rate
+spec:
+  sloRef: checkout-availability    # an SLO in the same tree
+  indicator:
+    metadata:
+      name: checkout-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m]))
+  detection:
+    strategy: adaptive
+    seasonality: [daily, weekly]
+    class: requests
+    sensitivity: balanced
+  alerting:
+    for: 10m
+```
+
+```text
+  paging episodes       2, plus 0 flaps that crossed the band without reaching for
+  paged wall clock      3h  (12.50% of the reported window)
+  budget overlap        0 of 2 paging episodes coincided with the budget burning
+                        0s of 3h paged wall clock  (0.00%)
+  linked SLO            checkout-availability, objective 99.9%
+  budget burning        120 of 10081 instants: 0 absent, 0 undefined
+```
+
+That report says delete the detector, and it says it without ambiguity: the
+budget did burn over the window, and none of the pages landed on it. The burn
+signal is compiled from the SLO's own objective and indicator, so nothing has
+to be deployed and no recording rule has to be named a particular way. A
+detector with no `sloRef` says it has none rather than printing a zero, which
+is a different thing.
+
 `-o` is the target's `output` in `feno.yaml` when it is left off, read
 relative to the file that declared it.
 
@@ -88,13 +133,13 @@ feno generate -f detectors/ -o rules/anomaly/ --url http://mimir/prometheus
 
 | Package | What it does |
 | --- | --- |
-| `internal/spec` | Reads a directory of OpenSLO and detector YAML, resolves each detector's datasource reference, and turns a detector into a band |
+| `internal/spec` | Reads a directory of OpenSLO and detector YAML, resolves each detector's datasource and SLO references, and turns a detector into a band |
 | `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together, and probes one instant query for the optional functions the server has |
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
-| `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
-| `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and refuses a band PromQL cannot express rather than approximating it |
+| `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for`, and intersects those episodes with another timeline |
+| `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and a linked SLO into the burn query the budget overlap is read from, refusing what PromQL cannot express rather than approximating it |
 | `internal/config` | Reads `feno.yaml`: the repository's targets and its noise budget, with a limit per detector where one default will not do |
-| `internal/backtest` | Ties the four together: the query range a band's lookback demands, the aggregation across the series one query returns, and the report a person reads |
+| `internal/backtest` | Ties the others together: the query range a band's lookback demands, the second read the budget overlap is an intersection with, the aggregation across the series one query returns, and the report a person reads |
 
 Specification to band to episodes to report is `backtest`, and specification
 to band to rules is `generate`. What is missing is the ClickHouse target.
@@ -130,9 +175,9 @@ rules a person can read while holding a pager.
 done: separate paging episodes, total firing time, the longest one, which
 series caused them, and how much of it coincided with an error budget actually
 burning. It writes nothing and needs only read access, so it is useful before
-anybody agrees to deploy anything. The budget overlap is the one part not
-computed yet; the report names what it is still missing rather than printing a
-zero.
+anybody agrees to deploy anything. A detector that links to no SLO is told
+apart from one whose pages never landed on a burning budget, because the
+second is a finding and the first is a missing line in a file.
 
 ## Why the specification is OpenSLO's
 
@@ -156,7 +201,9 @@ underneath.
    and `promtool` in CI
 4. `backtest` over `/api/v1/query_range`, with the episode report
 5. `generate`, which is the command over `internal/rules`
-6. The ClickHouse target, which depends on four changes in clickhouse-ruler
+6. The budget overlap, which is a second read of the same window against the
+   burn signal compiled from the SLO a detector links to
+7. The ClickHouse target, which depends on four changes in clickhouse-ruler
 
 Steps 2 and 4 came before step 1 because both are pure functions over numbers
 and a time range, so they could be pinned by tests without a specification

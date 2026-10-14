@@ -1,0 +1,35 @@
+# The SLO a detector links to, with its indicator declared separately. An
+# indicatorRef across two documents is the shape a repository that reuses one
+# SLI for several SLOs already has.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-availability
+spec:
+  ratioMetric:
+    counter: true
+    good:
+      metricSource:
+        metricSourceRef: mimir-prod
+        spec:
+          query: sum(rate(http_requests_total{service="checkout",code!~"5.."}[5m]))
+    total:
+      metricSource:
+        metricSourceRef: mimir-prod
+        spec:
+          query: sum(rate(http_requests_total{service="checkout"}[5m]))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-availability
+spec:
+  service: checkout
+  indicatorRef: checkout-availability
+  budgetingMethod: Occurrences
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - displayName: 99.9% of checkout requests succeed
+      target: 0.999

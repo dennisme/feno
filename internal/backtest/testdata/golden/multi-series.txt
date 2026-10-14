@@ -12,8 +12,8 @@ checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 sampl
   peak concurrent       2 series firing at 2026-09-04T11:00:00Z
   longest episode       3h from 2026-09-04T11:00:00Z  {instance="web-2"}
   without a verdict     0 of 75 series-instants: 0 cold, 0 absent, 0 undefined
-  budget overlap        not computed: needs a burn-rate query per SLO, a
-                        second read, and an intersection of firing timelines
+  budget overlap        no linked SLO: set spec.sloRef to the SLO this detector
+                        protects, or delete a detector nobody can tie to a burn
 
   series              firing  flaps  firing time  ratio   cold  absent  undefined
   {instance="web-2"}  1       0      3h           12.50%  0     0       0

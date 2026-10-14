@@ -34,9 +34,12 @@ the output is rules a person can read at three in the morning.
 what it would have done. How many separate times it would have paged, for how
 long, which series were responsible, and how much of it coincided with an
 error budget actually burning. That report is the whole point. A detector that
-never lined up with a real incident is a detector to delete. The budget
-overlap is the one number not computed yet, and the report says so rather than
-printing a zero.
+never lined up with a real incident is a detector to delete, and the report
+says that in those terms: how many of the paging episodes coincided with the
+linked SLO's budget being spent, and how much of the paged wall clock did. A
+detector that names no SLO says so rather than printing a zero, because an
+overlap of zero over a budget that was read is the finding and the two must
+not read alike.
 
 ## Why it is shaped this way
 

@@ -83,10 +83,7 @@ func (r *Report) Write(w io.Writer) error {
 		r.Window.Instants()*len(r.Series),
 		totals.Cold, totals.Absent, totals.Undefined))
 
-	// Budget overlap is named rather than left out. See the package comment
-	// for what computing it needs.
-	field(&b, "budget overlap", "not computed: needs a burn-rate query per SLO, a")
-	field(&b, "", "second read, and an intersection of firing timelines")
+	overlap(&b, r)
 
 	b.WriteString("\n")
 	if err := table(&b, r); err != nil {
@@ -98,9 +95,52 @@ func (r *Report) Write(w io.Writer) error {
 	b.WriteString("  the samples cover, or by the window times the series count, reads lower\n")
 	b.WriteString("  and flatters the detector: the first hides a series that was missing,\n")
 	b.WriteString("  the second shrinks every time the query matches another instance.\n")
+	if r.Budget != nil {
+		b.WriteString("\n")
+		b.WriteString("  The budget overlap is the one exception: it divides by the time somebody\n")
+		b.WriteString("  was paged, because the question behind it is what fraction of the pages\n")
+		b.WriteString("  landed on an error budget that was actually being spent.\n")
+	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// overlap is the budget overlap block: how much of the paging coincided with
+// the linked SLO's error budget burning, and what that signal was.
+//
+// Each case prints a different sentence rather than a number, because the
+// zeroes mean different things and the whole value of this block is that they
+// are told apart. No link is a detector nobody has tied to an objective, an
+// unmeasured budget is a query that answered nothing, and an overlap of zero
+// over a budget that was read is the finding: a detector whose pages never
+// landed on anything real.
+func overlap(b *strings.Builder, r *Report) {
+	if r.Budget == nil {
+		field(b, "budget overlap", "no linked SLO: set spec.sloRef to the SLO this detector")
+		field(b, "", "protects, or delete a detector nobody can tie to a burn")
+		return
+	}
+
+	touched, episodes := r.TouchedEpisodes()
+	switch {
+	case !r.Budget.Measured():
+		field(b, "budget overlap", "not computed: the burn query answered at no instant of the")
+		field(b, "", "window, which is the absence of a budget rather than a quiet one")
+	case episodes == 0:
+		field(b, "budget overlap", "nothing fired, so nothing coincided with the budget burning")
+	default:
+		field(b, "budget overlap", fmt.Sprintf("%d of %d paging episodes coincided with the budget burning",
+			touched, episodes))
+		field(b, "", fmt.Sprintf("%s of %s paged wall clock  (%s)",
+			duration(r.CoincidentTime()), duration(r.PagedTime()), percent(r.CoincidentRatio())))
+	}
+
+	field(b, "linked SLO", fmt.Sprintf("%s, objective %s", r.Budget.SLO, r.Budget.Objective))
+	field(b, "budget burning", fmt.Sprintf("%d of %d instants: %d absent, %d undefined",
+		r.Budget.Counts.Burning, r.Window.Instants(),
+		r.Budget.Counts.Absent, r.Budget.Counts.Undefined))
+	field(b, "burn signal", r.Budget.Query+" "+r.Budget.Comparison())
 }
 
 // table is the per-series breakdown, worst first, which is what answers
@@ -112,12 +152,23 @@ func table(b *strings.Builder, r *Report) error {
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	row := func(format string, args ...any) { _, _ = fmt.Fprintf(tw, format, args...) }
 
-	row("  series\tfiring\tflaps\tfiring time\tratio\tcold\tabsent\tundefined\n")
+	// The coincident column exists only when there is a budget to be
+	// coincident with. A column of zeroes against no linked SLO would read as
+	// a verdict, which is the mistake the block above is written to avoid.
+	coincident := ""
+	if r.Budget != nil {
+		coincident = "\tcoincident"
+	}
+
+	row("  series\tfiring\tflaps\tfiring time\tratio\tcold\tabsent\tundefined%s\n", coincident)
 	for _, s := range r.Series {
-		row("  %s\t%d\t%d\t%s\t%s\t%d\t%d\t%d\n",
+		if r.Budget != nil {
+			coincident = "\t" + duration(s.Coincident())
+		}
+		row("  %s\t%d\t%d\t%s\t%s\t%d\t%d\t%d%s\n",
 			labels(s.Labels), s.Summary.Firing, s.Summary.Flaps,
 			duration(s.Summary.FiringTime), percent(r.Ratio(s.Summary.FiringTime)),
-			s.Counts.Cold, s.Counts.Absent, s.Counts.Undefined)
+			s.Counts.Cold, s.Counts.Absent, s.Counts.Undefined, coincident)
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("writing the series table: %w", err)

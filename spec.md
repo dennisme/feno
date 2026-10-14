@@ -822,7 +822,7 @@ api-latency / HighP99Latency   sources={team=payments}   window=30d
 
 Every number there is derivable from what backfill already computes. It is a reporting layer over existing evaluation, not new machinery. Shipping it benefits every threshold rule in the repo immediately, not just anomaly rules, which makes it the cheapest high-value next commit in the project.
 
-The SLO-burn overlap column from Part 1 comes later and needs the OpenSLO link described below.
+The SLO-burn overlap column from Part 1 needs the OpenSLO link described below. On the ClickHouse target it still comes after the four prerequisites; on Prometheus it landed with the backtest, and Part 12 records how.
 
 ### What the anomaly layer adds on top
 
@@ -847,7 +847,7 @@ That is also what makes the burn-overlap number possible. If the SLO objects and
 2. Baseline freshness validation in `--online` via `system.view_refreshes`.
 3. `DataSource` reading, so sources are declared once and shared with SLO tooling.
 4. The anomaly generator: spec in, refreshable MV DDL plus ruler rule out. Separate binary or a `ruler generate` subcommand, decided by whether the spec types want their own release cycle.
-5. Burn-rate overlap in the report, once 3 and 4 exist.
+5. Burn-rate overlap in the report, once 3 and 4 exist. This is the ClickHouse half only. The number itself is already shipped on the Prometheus target (Part 12), so what is left here is the second read against a ClickHouse source, not the design.
 6. Typed-decision triage, still opt-in, still a separate module, still last.
 
 ### Correction to earlier parts
@@ -890,9 +890,10 @@ Three further advantages:
 2. `detect/` IR with an explicit capability model.
 3. Prometheus emitter, golden tests against the Grafana reference rules, `promtool` in CI.
 4. `backtest` over `/api/v1/query_range`, with the episode report.
-5. Harden, get it operated against something real.
-6. The four clickhouse-ruler prerequisites above.
-7. ClickHouse target: refreshable MV DDL plus ruler rule, golden tests against hand-written artifacts.
+5. The budget overlap: a second read of the same window against the burn signal compiled from a linked SLO (Part 12).
+6. Harden, get it operated against something real.
+7. The four clickhouse-ruler prerequisites above.
+8. ClickHouse target: refreshable MV DDL plus ruler rule, golden tests against hand-written artifacts.
 
 ---
 
@@ -1236,3 +1237,114 @@ whether recommending `--enable-feature=promql-experimental-functions` to users
 is considered reasonable. If it is, the flagged form is the documented default
 and IQR is the fallback. If it is not, IQR is the default and `mad_over_time` is
 the opportunistic upgrade.
+
+---
+
+## Part 12: The budget overlap
+
+Decided 2026-10-13. Shipped on the Prometheus target.
+
+Part 1 calls overlap with an error budget actually burning the most useful
+number in the report, and Part 10 calls deleting a detector a first-class
+outcome. Both need the same thing: a second timeline to intersect the firing
+episodes with. These are the four decisions behind it.
+
+### 1. The burn signal is compiled from the SLO
+
+Three candidates. Compile a burn-rate query from the SLO's own objective and
+indicator; query the recording rules sloth or pyrra already commit; or read
+the `ALERTS` series for the burn alerts that actually fired.
+
+The first, for three reasons. It needs nothing deployed, which is the same
+property that makes the rest of `backtest` a read-only command somebody can
+run on a laptop. It needs no naming convention, where the second depends on
+whichever of `slo:sli_error:ratio_rate5m` and its neighbours the generator in
+that repository happens to emit. And it answers the question that was asked:
+"was the budget burning" is a property of the SLO, where `ALERTS` answers
+"did somebody get paged", which is a judgement about severity windows that
+belongs to whoever wrote the alert.
+
+Two shapes reach the compiler. A ratio indicator with an occurrence target
+becomes the error ratio over the allowance the target leaves, which is the
+burn rate, and above one the budget is being spent faster than the objective
+permits. A threshold indicator with an `op` and a `value` has no rate to
+compute: the budget is spent at exactly the instants the threshold is
+violated, so the comparison is the objective's own, negated.
+
+This is not sloth's multiwindow burn-rate alert and does not try to be. Those
+are a judgement about when to wake somebody, with a short window, a long
+window and a factor per severity. This is the budget being spent, which is
+what an anomaly episode either did or did not coincide with.
+
+The comparison is read as a value and compared in Go rather than written into
+the query as `> bool 1`. A PromQL comparison with `bool` returns 0 where the
+SLI divided by zero, because NaN compares false, and a burn signal that is
+quietly not burning wherever the SLI is undefined would make every overlap
+number flatter the detector.
+
+### 2. A detector links to an SLO with `spec.sloRef`
+
+A new optional field on `AnomalyDetector`, so this is a schema change to our
+own kind. It is still the right answer. A shared `metricSourceRef` is the
+connection and many SLOs share one, so it says nothing about which objective
+a detector protects. An indicator name matching an `SLI` is a link that
+disappears the day somebody renames one, with nothing in either document
+saying a link was meant.
+
+The loader resolves it the way it resolves `metricSourceRef`: a name that
+resolves to nothing names the file and the field, and a name that resolves to
+the wrong kind says which kind it found and where. A linked SLO's own
+`indicatorRef` is followed too, because that reference also spans documents
+and nothing downstream holds the whole tree. An SLO nobody linked to is left
+alone: refusing a repository over a document this tool has no business
+reading would be the wrong kind of strict.
+
+### 3. The number is both counts
+
+The report prints two lines. How many paging episodes coincided with the
+budget burning at all, out of how many fired, and how much of the paged wall
+clock did.
+
+Either alone is misleading. "0 of 14 episodes" is the crisp deletion signal
+and says nothing about a detector that fires for six hours around a five
+minute burn. The fraction is fair about duration and reads as 0.00% for a
+single brief overlap, which looks like no overlap at all. They go to zero
+together, which is what matters, and the episode count leads because that is
+the unit the rest of the report counts in.
+
+The fraction's denominator is the paged time and not the reported window. It
+is the one ratio in the report that does not divide by the window, the report
+says so, and the reason is that the question behind it is what fraction of
+the pages landed on something real. A month of quiet hours has no bearing on
+that.
+
+Only the firing part of an episode counts, from the instant it survived `for`
+to the one it ended at. A flap contributes nothing: nobody was woken, so
+there was nothing for an incident to coincide with.
+
+### 4. Three zeroes, told apart
+
+A detector with no `sloRef` says it has none, and says what to do about it.
+An SLO whose burn query answered at no instant of the window says the overlap
+is not computed, because that is the absence of a budget rather than a quiet
+one. An overlap of zero over a budget that was read and did burn is the
+finding, and it is the only one of the three that a reader should act on.
+
+None of them is a noise budget limit, and not yet on purpose. A `minOverlap`
+in `feno.yaml` would fail a pull request for a detector whose window happened
+to hold no incident, which is an absence of data rather than a noisy rule,
+and the gate would be loudest exactly when the evidence is weakest. The
+report names the case; a person decides.
+
+### What proves it
+
+The intersection is a pure function over two timelines and is tested as one,
+in `internal/episode`, with the two timelines written as pictures of the same
+minutes. What no fixture can be evidence for is that the two range reads land
+on the same instants: two grids offset from each other intersect in nothing
+however much the two conditions coincided, which is indistinguishable from
+the finding. So `history/seed` emits a successful-request series beside the
+total one, `just backtest-history` runs the burn signal as an SLO ratio over
+the pair, and the integration test asserts the grid rather than a number of
+episodes: every reported instant carried a burn value, and some of them were
+burning.

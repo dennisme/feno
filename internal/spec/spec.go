@@ -127,6 +127,20 @@ type DetectorSpec struct {
 	Indicator   v1.SLOIndicatorInline `json:"indicator"`
 	Detection   Detection             `json:"detection"`
 	Alerting    Alerting              `json:"alerting,omitempty"`
+
+	// SLORef names the SLO whose error budget this detector is judged
+	// against, and is what makes the budget overlap in a backtest report
+	// computable: an episode that never coincided with that budget burning
+	// is a candidate for deletion.
+	//
+	// It is a field of its own rather than something inferred. A shared
+	// metricSourceRef is the connection and many SLOs share one, so it says
+	// nothing about which objective this detector protects. An indicator
+	// name matching an SLI is a link that disappears when somebody renames
+	// one, with nothing in either document saying a link was meant. Empty is
+	// allowed and is a detector nobody has tied to an objective, which the
+	// report says rather than reporting a zero overlap.
+	SLORef string `json:"sloRef,omitempty"`
 }
 
 // Detection is the band, in the terms an author writes rather than the terms

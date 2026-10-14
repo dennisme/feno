@@ -3,6 +3,7 @@ package backtest
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +56,11 @@ type segment struct {
 	// Absent leaves the instants with no sample, which is a series that was
 	// not being scraped rather than one that was flat.
 	Absent bool `json:"absent"`
+
+	// Undefined is a sample the server returned and could not compute: a
+	// ratio that divided by zero. JSON has no way to write a NaN, so it is
+	// a flag rather than a value.
+	Undefined bool `json:"undefined"`
 }
 
 // load reads a detector fixture.
@@ -77,11 +83,31 @@ func load(t *testing.T, name string) spec.Detector {
 // a report of absences that looks like a finding.
 func history(t *testing.T, name string, w Window) *prometheus.Result {
 	t.Helper()
+	return read(t, "history", name, w.ReadStart, w.Step)
+}
+
+// burn reads a burn signal fixture and returns it as the second read would
+// have.
+//
+// It starts at the window's start rather than its read start, because a burn
+// signal needs no warm-up: the band's lookback is history the detector needs
+// to have a verdict at all, and the budget either was or was not burning at
+// an instant. The grid is the same, which is the part that has to be true for
+// the two timelines to intersect in anything.
+func burn(t *testing.T, name string, w Window) *prometheus.Result {
+	t.Helper()
+	return read(t, "burn", name, w.Start, w.Step)
+}
+
+// read is one fixture, as the reader would have returned it, checked against
+// the instant and the step the window says it covers.
+func read(t *testing.T, dir, name string, start time.Time, step time.Duration) *prometheus.Result {
+	t.Helper()
 
 	// G304 is reading a path built from a variable, which is what a fixture
 	// loader does. Excluded in _test.go by the lint configuration, and named
 	// here because the loader in internal/spec carries the same note.
-	data, err := os.ReadFile(filepath.Join("testdata", "history", name)) //nolint:gosec
+	data, err := os.ReadFile(filepath.Join("testdata", dir, name)) //nolint:gosec
 	if err != nil {
 		t.Fatalf("reading %s: %v", name, err)
 	}
@@ -93,7 +119,7 @@ func history(t *testing.T, name string, w Window) *prometheus.Result {
 		t.Fatalf("decoding %s: %v", name, err)
 	}
 
-	start, err := time.Parse(time.RFC3339, f.Start)
+	fixtureStart, err := time.Parse(time.RFC3339, f.Start)
 	if err != nil {
 		t.Fatalf("%s: start %q: %v", name, f.Start, err)
 	}
@@ -101,11 +127,11 @@ func history(t *testing.T, name string, w Window) *prometheus.Result {
 	if err != nil {
 		t.Fatalf("%s: step %q: %v", name, f.Step, err)
 	}
-	if !start.Equal(w.ReadStart) {
-		t.Fatalf("%s starts at %s, the window reads from %s", name, f.Start, instant(w.ReadStart))
+	if !fixtureStart.Equal(start) {
+		t.Fatalf("%s starts at %s, the window wants %s", name, f.Start, instant(start))
 	}
-	if fixtureStep != w.Step {
-		t.Fatalf("%s is at step %v, the window is at %v", name, fixtureStep, w.Step)
+	if fixtureStep != step {
+		t.Fatalf("%s is at step %v, the window is at %v", name, fixtureStep, step)
 	}
 
 	result := &prometheus.Result{Stats: prometheus.Stats{Requests: 1}}
@@ -117,12 +143,15 @@ func history(t *testing.T, name string, w Window) *prometheus.Result {
 		var index int
 		for _, seg := range s.Segments {
 			for range seg.Repeat {
-				at := start.Add(time.Duration(index) * fixtureStep)
+				at := fixtureStart.Add(time.Duration(index) * fixtureStep)
 				index++
 				if seg.Absent {
 					continue
 				}
 				value := seg.Value
+				if seg.Undefined {
+					value = math.NaN()
+				}
 				// The sign alternates on the sample's position in the whole
 				// series rather than within the segment, so the alternation
 				// survives a segment boundary and every even-length window
@@ -155,12 +184,21 @@ func window(t *testing.T, d spec.Detector) Window {
 	return w
 }
 
-// analyse is the whole slice over one detector and one history fixture.
-func analyse(t *testing.T, detector, file string) *Report {
+// analyse is the whole slice over one detector and one history fixture, plus
+// the burn fixture a detector linked to an SLO is judged against. A detector
+// that links to none is passed no burn fixture, which is the common case and
+// the reason the argument is variadic.
+func analyse(t *testing.T, detector, file string, burnFile ...string) *Report {
 	t.Helper()
 	d := load(t, detector)
 	w := window(t, d)
-	report, err := Analyse(d, w, history(t, file, w))
+
+	var burning *prometheus.Result
+	if len(burnFile) == 1 {
+		burning = burn(t, burnFile[0], w)
+	}
+
+	report, err := Analyse(d, w, history(t, file, w), burning)
 	if err != nil {
 		t.Fatalf("analysing %s over %s: %v", detector, file, err)
 	}
