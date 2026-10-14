@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +177,12 @@ func TestGenerateFlags(t *testing.T) {
 			inStderr: "no such file or directory",
 		},
 		{
+			name: "a probed server and the offline override together",
+			args: []string{"-f", "testdata/detectors", "-o", "out",
+				"--url", "http://localhost:9090", "--experimental-functions"},
+			inStderr: "--url and --experimental-functions",
+		},
+		{
 			name:     "specifications with no detector in them",
 			args:     []string{"-f", "testdata/datasource.yaml", "-o", "out"},
 			inStderr: "no detector to generate from",
@@ -195,5 +204,133 @@ func TestGenerateFlags(t *testing.T) {
 				t.Errorf("stdout = %q, want nothing", stdout.String())
 			}
 		})
+	}
+}
+
+// probed starts a server that answers the capability probe with body and
+// status, and returns its URL and the headers it was asked with.
+func probed(t *testing.T, status int, body string) (string, *[]http.Header) {
+	t.Helper()
+
+	var headers []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = append(headers, r.Header.Clone())
+		if r.URL.Path != "/api/v1/query" {
+			t.Errorf("probe asked %q, want %q", r.URL.Path, "/api/v1/query")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if _, err := io.WriteString(w, body); err != nil {
+			t.Errorf("writing response: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv.URL, &headers
+}
+
+const (
+	probeAnswered = `{"status":"success","data":{"resultType":"vector","result":[]}}`
+	probeUnknown  = `{"status":"error","errorType":"bad_data","error":"invalid parameter \"query\": 1:1: parse error: unknown function with name \"mad_over_time\""}`
+)
+
+// TestGenerateProbesTarget is Part 11's capability model end to end: the same
+// specification compiles to the median absolute deviation against a server
+// that has the function and to the interquartile range against one that does
+// not, and the command says which.
+func TestGenerateProbesTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		inRules  string
+		inStderr string
+	}{
+		{
+			name:     "a server with the function enabled",
+			status:   http.StatusOK,
+			body:     probeAnswered,
+			inRules:  "mad_over_time",
+			inStderr: "mad_over_time available, emitting median absolute deviation",
+		},
+		{
+			name:     "a server without it",
+			status:   http.StatusBadRequest,
+			body:     probeUnknown,
+			inRules:  "quantile_over_time(0.75,",
+			inStderr: "mad_over_time unavailable, emitting interquartile range",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, _ := probed(t, tt.status, tt.body)
+			out := t.TempDir()
+
+			var stdout, stderr bytes.Buffer
+			args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--url", url}
+			if got := run(args, &stdout, &stderr); got != exitOK {
+				t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
+			}
+
+			data, err := os.ReadFile(filepath.Join(out, "api-latency.yaml"))
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			if !strings.Contains(string(data), tt.inRules) {
+				t.Errorf("api-latency.yaml does not contain %q:\n%s", tt.inRules, data)
+			}
+			if !strings.Contains(stderr.String(), url) {
+				t.Errorf("stderr = %q, want it to name the server probed", stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.inStderr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.inStderr)
+			}
+		})
+	}
+}
+
+// TestGenerateProbeSendsHeaders covers the multi-tenant target: the probe is a
+// query like any other and Mimir will not answer it without X-Scope-OrgID.
+func TestGenerateProbeSendsHeaders(t *testing.T) {
+	url, headers := probed(t, http.StatusOK, probeAnswered)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"generate", "-f", "testdata/detectors", "-o", t.TempDir(),
+		"--url", url, "--header", "X-Scope-OrgID=team-checkout"}
+	if got := run(args, &stdout, &stderr); got != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
+	}
+
+	if len(*headers) != 1 {
+		t.Fatalf("the probe made %d requests, want 1", len(*headers))
+	}
+	if got := (*headers)[0].Get("X-Scope-OrgID"); got != "team-checkout" {
+		t.Errorf("X-Scope-OrgID = %q, want %q", got, "team-checkout")
+	}
+}
+
+// TestGenerateProbeFailureWritesNothing is why the probe returns an error: a
+// band that changed shape because something in the path was broken has to be
+// loud, not a silent fallback to the other form.
+func TestGenerateProbeFailureWritesNothing(t *testing.T) {
+	url, _ := probed(t, http.StatusServiceUnavailable, "upstream connect error")
+	out := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--url", url}
+	if got := run(args, &stdout, &stderr); got == exitOK {
+		t.Fatalf("exit code = %d, want a failure\nstderr: %s", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "mad_over_time") {
+		t.Errorf("stderr = %q, want it to say what failed", stderr.String())
+	}
+
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatalf("reading %s: %v", out, err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("a failed probe wrote %d files, want none", len(entries))
 	}
 }

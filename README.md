@@ -24,15 +24,22 @@ specification and a hash of it. `--check` writes nothing and fails when the
 committed files are not what the specifications compile to, which is the
 drift gate a pull request runs offline.
 
+`--url` probes that server once for the optional functions it was started
+with, so the band is compiled against what the server has rather than against
+a flag somebody had to know the answer to. Without it the compilation is
+offline and `--experimental-functions` decides, which is what keeps the drift
+gate working on a fork pull request with no path to production.
+
 ```bash
 feno generate -f detectors/ -o rules/anomaly/
 feno generate -f detectors/ -o rules/anomaly/ --check
+feno generate -f detectors/ -o rules/anomaly/ --url http://mimir/prometheus
 ```
 
 | Package | What it does |
 | --- | --- |
 | `internal/spec` | Reads a directory of OpenSLO and detector YAML, resolves each detector's datasource reference, and turns a detector into a band |
-| `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together |
+| `internal/prometheus` | Reads a range query from anything speaking `/api/v1/query_range`, chunked under the server's resolution limit and stitched back together, and probes one instant query for the optional functions the server has |
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for` |
 | `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and refuses a band PromQL cannot express rather than approximating it |
@@ -118,6 +125,7 @@ let that stay implicit.
 just          # list recipes
 just check    # what CI runs: lint, build, tests, markdownlint
 just test     # unit tests with -race
+just smoketest # the capability probe against two real Prometheus servers
 just init     # mise tool versions and pre-commit hooks
 ```
 

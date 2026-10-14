@@ -94,5 +94,51 @@ promtool:
     promtool check rules --enable-feature=promql-experimental-functions "$out"/*.yaml; \
     rm -rf "$out"
 
+# Prove the capability probe against a real Prometheus, both ways.
+#
+# Not part of `check`, because it needs Docker and pulls an image. What it
+# covers is the one decision in feno that depends on another project's wording:
+# the probe reads a parse error to decide whether mad_over_time may be
+# compiled, and a fixture of that sentence is evidence of nothing but itself.
+# Two servers, one started with the feature flag and one without, are the only
+# thing that says the read is right.
+#
+# It also runs the binary against both, because the integration test drives a
+# package and what a person sees is a process: the line on stderr naming the
+# form chosen, the expression that reached the file, and a non-zero exit when
+# the server cannot be reached.
+smoketest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    compose="docker compose -f smoketest/compose.yaml"
+    trap '$compose down --volumes >/dev/null 2>&1 || true' EXIT
+    $compose up -d --wait
+
+    for server in "19090 false quantile_over_time(0.75," "19091 true mad_over_time("; do
+        read -r port flag expression <<<"$server"
+        url="http://localhost:$port"
+
+        FENO_PROMETHEUS_URL="$url" FENO_EXPECT_EXPERIMENTAL_FUNCTIONS="$flag" \
+            env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration ./internal/prometheus/
+
+        out=$(mktemp -d)
+        go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" --url "$url" >/dev/null
+        grep -q -- "$expression" "$out/api-latency.yaml" \
+            || { echo "$url: api-latency.yaml does not use $expression"; exit 1; }
+        rm -rf "$out"
+    done
+
+    # The third answer: a port nothing is listening on is a failure, not a
+    # quiet fallback to the band the other server would have got.
+    out=$(mktemp -d)
+    if go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" --url http://localhost:19099; then
+        echo "generate succeeded against a server that is not there"
+        exit 1
+    fi
+    [ -z "$(ls -A "$out")" ] || { echo "a failed probe wrote files"; exit 1; }
+    rm -rf "$out"
+
+    echo "smoketest: both forms compiled from what the server answered"
+
 # Everything CI runs, in the order CI runs it.
 check: lint build test markdownlint

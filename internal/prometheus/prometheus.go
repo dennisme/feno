@@ -1,12 +1,14 @@
-// Package prometheus reads a PromQL query over a time range from any
-// Prometheus-compatible HTTP API and returns the series it found.
+// Package prometheus reads a PromQL query from any Prometheus-compatible HTTP
+// API and returns the series it found, and asks one server which optional
+// functions it has.
 //
 // This is the backtest's input. A detector is judged on real history, so the
 // first thing the tool has to do well is fetch a month of it from whatever is
 // already running: Prometheus, Mimir, Thanos, VictoriaMetrics, AMP, or
 // ClickHouse's Prometheus-compatible endpoint. All of them answer
-// `/api/v1/query_range`, which is the only endpoint here, and reading is all
-// this package does.
+// `/api/v1/query_range`, which is what the backtest reads, and
+// `/api/v1/query`, which is what [Client.Probe] asks a single question of.
+// Reading is all this package does.
 //
 // # Why there is no Reader interface
 //
@@ -31,12 +33,18 @@
 //
 // # What is not tested
 //
-// The tests here use an httptest.Server serving recorded fixtures, so what
+// Most tests here use an httptest.Server serving recorded fixtures, so what
 // they cover is this package: the chunk planner, the stitching, the parser and
 // the error paths. They prove nothing about how a real Prometheus behaves, and
-// no fixture should be read as evidence of server semantics. The claim that
-// this works against a real server needs an integration test against one,
-// behind a build tag, which this repository has nowhere to run yet.
+// no fixture should be read as evidence of server semantics.
+//
+// The probe is the exception, because it reads another project's wording to
+// decide what feno compiles, and a fixture of that wording is evidence of
+// nothing but itself. integration_test.go, behind a build tag, runs it against
+// a server started both ways; `just smoketest` is where the two servers come
+// from. What a real server does to a month-long chunked range query is still
+// unproven here, and internal/backtest's integration test is where that claim
+// belongs.
 package prometheus
 
 import (
@@ -57,9 +65,12 @@ import (
 // be the backtest's only visible symptom.
 const maxBodyBytes = 64 << 20
 
-// queryRangePath is appended to the configured base URL, so a base carrying a
+// The API paths are appended to the configured base URL, so a base carrying a
 // prefix like Mimir's `/prometheus` or ClickHouse's `/prometheus` keeps it.
-const queryRangePath = "api/v1/query_range"
+const (
+	queryRangePath = "api/v1/query_range"
+	queryPath      = "api/v1/query"
+)
 
 // Point is one sample: when it was evaluated and what it was worth. Value can
 // be NaN or an infinity, because the server reports those and a backtest that
@@ -94,7 +105,7 @@ type Result struct {
 	Stats  Stats
 }
 
-// Client reads range queries from one endpoint.
+// Client reads queries from one server.
 //
 // Header is sent with every request, which is how a multi-tenant target is
 // reached at all: Mimir and Thanos require X-Scope-OrgID, and an
@@ -108,7 +119,7 @@ type Client struct {
 	Header             http.Header
 	MaxPointsPerSeries int
 
-	endpoint *url.URL
+	base *url.URL
 }
 
 // New builds a client for a base URL such as http://localhost:9090 or
@@ -124,7 +135,7 @@ func New(baseURL string) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("base url %q: no host", baseURL)
 	}
-	return &Client{endpoint: u.JoinPath(queryRangePath)}, nil
+	return &Client{base: u}, nil
 }
 
 // QueryRange evaluates query at every step between start and end.
@@ -147,7 +158,7 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 			return nil, fmt.Errorf("%s..%s: %w", ch.start, ch.end, err)
 		}
 
-		series, warnings, err := c.query(ctx, query, ch, step)
+		series, warnings, err := c.queryRange(ctx, query, ch, step)
 		if err != nil {
 			return nil, fmt.Errorf("%s..%s step %v: %w", ch.start, ch.end, step, err)
 		}
@@ -172,12 +183,8 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	return &result, nil
 }
 
-// query performs one request.
-//
-// It is a POST because a generated band expression runs to hundreds of
-// characters and a GET of it meets a proxy's URL length limit as a 414 that
-// looks like the query is wrong.
-func (c *Client) query(ctx context.Context, query string, ch chunk, step time.Duration) ([]Series, []string, error) {
+// queryRange performs one range request.
+func (c *Client) queryRange(ctx context.Context, query string, ch chunk, step time.Duration) ([]Series, []string, error) {
 	form := url.Values{
 		"query": {query},
 		"start": {formatTime(ch.start)},
@@ -185,10 +192,50 @@ func (c *Client) query(ctx context.Context, query string, ch chunk, step time.Du
 		"step":  {strconv.FormatFloat(step.Seconds(), 'f', -1, 64)},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint.String(),
+	status, body, err := c.post(ctx, c.base.JoinPath(queryRangePath), form)
+	if err != nil {
+		return nil, nil, err
+	}
+	return parseResponse(status, body)
+}
+
+// Query evaluates query at one instant.
+//
+// This is how an optional server feature is detected: the answer to a query
+// that uses it says whether the server has it, and nothing in a specification
+// file can. See [Probe].
+func (c *Client) Query(ctx context.Context, query string, at time.Time) (*Result, error) {
+	form := url.Values{
+		"query": {query},
+		"time":  {formatTime(at)},
+	}
+
+	status, body, err := c.post(ctx, c.base.JoinPath(queryPath), form)
+	if err != nil {
+		return nil, err
+	}
+	series, warnings, err := parseInstant(status, body)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &Result{Series: series, Stats: Stats{Requests: 1, Warnings: warnings}}
+	for _, s := range series {
+		result.Stats.Points += len(s.Points)
+	}
+	return result, nil
+}
+
+// post performs one request.
+//
+// It is a POST because a generated band expression runs to hundreds of
+// characters and a GET of it meets a proxy's URL length limit as a 414 that
+// looks like the query is wrong.
+func (c *Client) post(ctx context.Context, endpoint *url.URL, form url.Values) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(),
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, nil, fmt.Errorf("building request: %w", err)
+		return 0, nil, fmt.Errorf("building request: %w", err)
 	}
 	for name, values := range c.Header {
 		req.Header[http.CanonicalHeaderKey(name)] = slices.Clone(values)
@@ -202,17 +249,17 @@ func (c *Client) query(ctx context.Context, query string, ch chunk, step time.Du
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("requesting %s: %w", c.endpoint, err)
+		return 0, nil, fmt.Errorf("requesting %s: %w", endpoint, err)
 	}
 	// A close failure on a body already read to the end says nothing the
-	// caller can act on, and reporting it would mask the parse error below.
+	// caller can act on, and reporting it would mask the parse error above.
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading response: %w", err)
+		return 0, nil, fmt.Errorf("reading response: %w", err)
 	}
-	return parseResponse(resp.StatusCode, body)
+	return resp.StatusCode, body, nil
 }
 
 // formatTime renders a timestamp the way the API documents it, as a unix

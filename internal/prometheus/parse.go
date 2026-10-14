@@ -52,24 +52,15 @@ type wireData struct {
 type wireSeries struct {
 	Metric map[string]string `json:"metric"`
 	Values []json.RawMessage `json:"values"`
+	Value  json.RawMessage   `json:"value"`
 }
 
 // parseResponse turns one range query answer into series and the warnings that
 // came with it.
 func parseResponse(statusCode int, body []byte) ([]Series, []string, error) {
-	var resp wireResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, nil, fmt.Errorf("http %d: body is not JSON: %q: %w",
-			statusCode, snippet(body), ErrResponse)
-	}
-
-	if resp.Status == "error" {
-		return nil, nil, fmt.Errorf("http %d: %s: %s: %w",
-			statusCode, orUnknown(resp.ErrorType), orUnknown(resp.Error), ErrQuery)
-	}
-	if statusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("http %d with status %q: %q: %w",
-			statusCode, resp.Status, snippet(body), ErrResponse)
+	resp, err := decode(statusCode, body)
+	if err != nil {
+		return nil, nil, err
 	}
 	if resp.Data.ResultType != "matrix" {
 		return nil, nil, fmt.Errorf("result type %q, want matrix: %w",
@@ -89,6 +80,58 @@ func parseResponse(statusCode int, body []byte) ([]Series, []string, error) {
 		})
 	}
 	return series, resp.Warnings, nil
+}
+
+// parseInstant turns one instant query answer into series carrying the single
+// sample each label set was evaluated to.
+//
+// A vector element is a label set and one sample, so it arrives as a Series of
+// one point rather than as a type of its own: everything downstream already
+// joins on [SeriesKey].
+func parseInstant(statusCode int, body []byte) ([]Series, []string, error) {
+	resp, err := decode(statusCode, body)
+	if err != nil {
+		return nil, nil, err
+	}
+	if resp.Data.ResultType != "vector" {
+		return nil, nil, fmt.Errorf("result type %q, want vector: %w",
+			resp.Data.ResultType, ErrResponse)
+	}
+
+	series := make([]Series, 0, len(resp.Data.Result))
+	for _, w := range resp.Data.Result {
+		points, err := parsePoints([]json.RawMessage{w.Value})
+		if err != nil {
+			return nil, nil, fmt.Errorf("series %s: %w", SeriesKey(w.Metric), err)
+		}
+		series = append(series, Series{
+			Key:    SeriesKey(w.Metric),
+			Labels: w.Metric,
+			Points: points,
+		})
+	}
+	return series, resp.Warnings, nil
+}
+
+// decode reads the envelope and reports whatever is in it that is not an
+// answer: a body that is not the API's JSON at all, a query the server
+// rejected, and a status code no successful answer carries.
+func decode(statusCode int, body []byte) (*wireResponse, error) {
+	var resp wireResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("http %d: body is not JSON: %q: %w",
+			statusCode, snippet(body), ErrResponse)
+	}
+
+	if resp.Status == "error" {
+		return nil, fmt.Errorf("http %d: %s: %s: %w",
+			statusCode, orUnknown(resp.ErrorType), orUnknown(resp.Error), ErrQuery)
+	}
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("http %d with status %q: %q: %w",
+			statusCode, resp.Status, snippet(body), ErrResponse)
+	}
+	return &resp, nil
 }
 
 func parsePoints(values []json.RawMessage) ([]Point, error) {

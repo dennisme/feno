@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": { "__name__": "up", "instance": "a:9100" },
+        "value": [1700000000, "1"]
+      },
+      {
+        "metric": { "__name__": "up", "instance": "b:9100" },
+        "value": [1700000000.5, "NaN"]
+      }
+    ]
+  }
+}
