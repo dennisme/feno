@@ -45,6 +45,15 @@ over the noise budget in `feno.yaml`, so it can gate a pull request. A runner
 that cannot reach the datasource exits 3 instead, which says the budget was
 never checked rather than that it held.
 
+Every request carries a deadline, `--request-timeout`, defaulting to 30
+seconds, so a server that accepts a connection and never answers ends the run
+instead of hanging the job. It is per request rather than per run: a run that
+gave up halfway reported some detectors and not others, and the code for a
+datasource nobody reached would be a claim about the whole run that is not
+true of it. Ctrl-C keeps the reports already printed and exits 3 for the same
+reason. What each exit code means, and the workflow to copy, is
+[Running the gate in CI](https://dennisme.github.io/feno/ci/).
+
 ```bash
 feno backtest -f detectors/ --url http://mimir/prometheus --from -30d
 ```

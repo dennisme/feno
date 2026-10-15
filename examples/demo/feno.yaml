@@ -1,0 +1,10 @@
+# The repository half of the gate: where the rules go, and what counts as too
+# noisy. Both live beside the specifications rather than in the workflow,
+# because a limit somebody can drop by editing the workflow is not a limit.
+targets:
+  - engine: prometheus
+    output: ../rules
+
+budget:
+  maxEpisodes: 4
+  maxFiringRatio: 0.02
