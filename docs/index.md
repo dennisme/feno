@@ -52,6 +52,13 @@ detector that names no SLO says so rather than printing a zero, because an
 overlap of zero over a budget that was read is the finding and the two must
 not read alike.
 
+A detector over its noise budget fails the build, and a detector that has to
+stay over it for now carries a `waiver` in `feno.yaml`: a reason, and a date
+it runs out on. Until that date the finding is still reported, named as
+waived, and the build passes. After it the waiver is itself a finding and the
+build fails, so the decision comes back to a reviewer instead of living on as
+a raised number nobody remembers writing.
+
 ## Why it is shaped this way
 
 The specification is OpenSLO's, extended rather than replaced. A team that

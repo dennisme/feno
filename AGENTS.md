@@ -89,6 +89,17 @@ length. Each detector is held to the strictest limit in the files from the
 set and may not loosen it. A finding names the file that set the limit it
 broke. `-config` names one file and replaces the walk.
 
+A detector entry may carry a `waiver`, with a `reason` and an `until`, which
+is a detector being over its budget on purpose until a date. One waiver covers
+both limits, the finding is still printed and named as waived, and the run
+exits 0; past the date the waiver is itself a finding and the run exits 1,
+whether or not the detector is still over. A waiver is not a limit, so it is
+not merged with the files above it: the nearest one wins, and every file on
+the walk may carry one. Nothing in `feno.yaml` waives `generate --check` or
+`promtool`. The decision is [config.Waiver.Waives] and
+[config.Waiver.Expired] over an instant the caller passes, so no test of it
+needs a clock.
+
 The tests that need a real Prometheus are behind the `integration` tag and
 skip with a message naming the environment variables they want.
 
@@ -117,7 +128,7 @@ What exists:
 | `internal/detect` | The band representation. One implementation, compiled by every target and evaluated by the backtest, because a second one makes the backtest stop predicting production |
 | `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, compiles a linked SLO's objective into the burn query the budget overlap is read from, and declares what the target cannot express |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for`, and the intersection of those episodes with another timeline |
-| `internal/config` | `feno.yaml`: the repository's targets and its noise budget, resolved per detector from the files above it with the stricter limit binding. A limit is a pointer, because zero is a budget somebody means |
+| `internal/config` | `feno.yaml`: the repository's targets and its noise budget, resolved per detector from the files above it with the stricter limit binding. A limit is a pointer, because zero is a budget somebody means. A detector entry may also carry a waiver, which expires rather than merging |
 | `internal/suggest` | `suggest`: one profiling read through internal/prometheus, the decisions as a pure function over that profile, and the drafted document. Deterministic and offline once the read is done, and nothing in it calls a model |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the second read the budget overlap intersects with, the aggregation across one query's series, and the report a person reads |
 | `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |

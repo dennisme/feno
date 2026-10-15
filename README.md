@@ -106,6 +106,36 @@ with a budget per team that file is often not the one the author is looking
 at. `-f` walks the tree, and `-config` names one file instead and reads
 nothing else.
 
+A detector that has to stay over budget for now says so with a waiver, which
+is the third way through a pull request and the one that does not outlive the
+incident:
+
+```yaml
+budget:
+  maxEpisodes: 4
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: black friday traffic shape, retuning after the freeze
+        until: 2026-12-05
+```
+
+One waiver covers both limits on that detector, both fields are required, and
+a run it covers exits 0 with the finding still printed:
+
+```console
+$ feno backtest -f alerting/ --url http://mimir/prometheus --from -14d
+waived: checkout-request-rate: 10 paging episodes, limit 4 (alerting/teams/checkout/feno.yaml)
+the waiver in alerting/teams/checkout/feno.yaml runs out on 2026-12-05T00:00:00Z: black friday traffic shape, retuning after the freeze
+```
+
+Past the date it is a finding of its own and the build fails, whether or not
+the detector is still over budget, so a waiver is renewed in front of a
+reviewer or deleted. Unlike a limit, a waiver is not merged with the files
+above it: the nearest one wins, so a team can waive a ceiling it does not own
+for a detector it does. Nothing in `feno.yaml` waives `generate --check` or
+`promtool`, which are correctness rather than noise.
+
 A detector that names the SLO it protects gets the number the report exists
 for: how much of its paging coincided with that SLO's error budget actually
 being spent.
@@ -167,7 +197,7 @@ feno generate -f detectors/ -o rules/anomaly/ --url http://mimir/prometheus
 | `internal/detect` | The band: one structured representation, every target compiles it and the backtest evaluates it |
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for`, and intersects those episodes with another timeline |
 | `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and a linked SLO into the burn query the budget overlap is read from, refusing what PromQL cannot express rather than approximating it |
-| `internal/config` | Reads `feno.yaml`: the repository's targets and its noise budget, with a limit per detector where one default will not do |
+| `internal/config` | Reads `feno.yaml`: the repository's targets and its noise budget, with a limit per detector where one default will not do and a waiver that expires where a detector has to stay over it |
 | `internal/suggest` | Profiles an SLI's series over a stated window, decides the fields nobody can fill in from the document alone, and renders the draft a person reviews |
 | `internal/backtest` | Ties the others together: the query range a band's lookback demands, the second read the budget overlap is an intersection with, the aggregation across the series one query returns, and the report a person reads |
 
