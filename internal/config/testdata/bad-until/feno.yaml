@@ -1,0 +1,6 @@
+budget:
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: black friday traffic shape
+        until: next friday

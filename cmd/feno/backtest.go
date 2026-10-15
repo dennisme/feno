@@ -55,9 +55,13 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	end := time.Now().UTC()
+	// One clock read for the whole run, so the window reported and the
+	// waivers judged against it cannot come from two different instants.
+	now := time.Now().UTC()
+
+	end := now
 	if *to != "" {
-		parsed, err := timestamp(*to, time.Now().UTC())
+		parsed, err := timestamp(*to, now)
 		if err != nil {
 			printf(stderr, "--to %s\n", err)
 			return exitUsage
@@ -100,7 +104,11 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 			printf(stderr, "%s\n", err)
 			return exitUsage
 		}
-		held = append(held, detectorBudget{detector: detector, thresholds: thresholds(limits)})
+		held = append(held, detectorBudget{
+			detector:   detector,
+			thresholds: thresholds(limits),
+			waiver:     limits.Waiver,
+		})
 	}
 	if len(held) == 0 {
 		printf(stderr, "no detector to report on in %s\n", strings.Join(paths, ", "))
@@ -123,7 +131,8 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 
 	var (
 		reported int
-		findings []string
+		failures []string
+		waived   []string
 	)
 	for _, held := range held {
 		report, err := backtest.Run(context.Background(), client, held.detector, options)
@@ -148,16 +157,21 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 			return exitUsage
 		}
 		reported++
-		findings = append(findings, report.Exceeded(held.thresholds)...)
+
+		verdict := judge(held.detector.Metadata.Name, report.Exceeded(held.thresholds), held.waiver, now)
+		failures = append(failures, verdict.failures...)
+		waived = append(waived, verdict.waived...)
 	}
 
-	if len(findings) > 0 {
-		for _, finding := range findings {
-			printf(stderr, "%s\n", finding)
-		}
-		return exitFinding
+	// The waived lines first, because they are the ones a reader of a green
+	// build would otherwise never look for.
+	for _, line := range waived {
+		printf(stderr, "%s\n", line)
 	}
-	return exitOK
+	for _, line := range failures {
+		printf(stderr, "%s\n", line)
+	}
+	return verdict{failures: failures}.code()
 }
 
 // detectorBudget is one detector and the limits it is held to, paired before
@@ -165,6 +179,7 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 type detectorBudget struct {
 	detector   spec.Detector
 	thresholds backtest.Thresholds
+	waiver     *config.Waiver
 }
 
 // budget answers what each detector is held to.

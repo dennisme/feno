@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dennisme/feno/internal/config"
 	"github.com/dennisme/feno/internal/spec"
 )
 
@@ -200,4 +201,130 @@ spec:
 	if !strings.Contains(report, "synthetic-availability") {
 		t.Errorf("the report does not name the SLO the draft linked:\n%s", report)
 	}
+}
+
+// TestWaivedDetectorAgainstPrometheus is the gate's third way through a pull
+// request, run end to end: a detector over its noise budget with an unexpired
+// waiver reports its finding and does not fail the build, and the same
+// detector after the date fails it.
+//
+// It runs against a real server because the exit code is the whole claim, and
+// the exit code is a function of what a real range read came back with. A
+// fixture report fed to [judge] is what TestJudge already covers.
+//
+// The budget is zero episodes, so the detector is over it if it paged at all,
+// and the first run asserts that it did. The history is this repository's own
+// seed rather than somebody's monitoring, so a detector at the most
+// aggressive sensitivity that pages nowhere in two days of a noisy series
+// means the rig is wrong, not that the claim is unprovable.
+//
+// What it needs, and skips without:
+//
+//	FENO_PROMETHEUS_URL     base URL of a Prometheus-compatible server
+//	FENO_PROMETHEUS_QUERY   a metric with data for the last two days on it
+//
+//	just backtest-history
+func TestWaivedDetectorAgainstPrometheus(t *testing.T) {
+	url := os.Getenv("FENO_PROMETHEUS_URL")
+	query := os.Getenv("FENO_PROMETHEUS_QUERY")
+	if url == "" || query == "" {
+		t.Skip("set FENO_PROMETHEUS_URL and FENO_PROMETHEUS_QUERY")
+	}
+
+	const detector = "noisy-detector"
+	specs := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(specs, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("datasource.yaml", fmt.Sprintf(`apiVersion: openslo/v1
+kind: DataSource
+metadata:
+  name: history
+spec:
+  type: Prometheus
+  connectionDetails:
+    url: %s
+`, url))
+
+	write("detector.yaml", fmt.Sprintf(`apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: %s
+spec:
+  indicator:
+    metadata:
+      name: synthetic-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: history
+          spec:
+            query: sum(%s)
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: aggressive
+`, detector, query))
+
+	// A budget of zero episodes: whatever the detector did, it is over.
+	budget := func(waiver string) {
+		t.Helper()
+		write(config.Filename, "budget:\n  maxEpisodes: 0\n  detectors:\n    "+
+			detector+":\n"+waiver)
+	}
+	backtest := func(t *testing.T) (int, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"backtest", "-f", specs, "--url", url, "--from", "-2d"}, &stdout, &stderr)
+		t.Logf("report:\n%s", stdout.String())
+		return code, stderr.String()
+	}
+
+	budget("")
+	code, findings := backtest(t)
+	if code != exitFinding {
+		t.Fatalf("backtest exit = %d, want %d: a detector held to zero episodes did not page over the seeded history\nstderr:\n%s",
+			code, exitFinding, findings)
+	}
+	if !strings.Contains(findings, detector) {
+		t.Errorf("stderr = %q, want a finding naming the detector", findings)
+	}
+
+	t.Run("an unexpired waiver", func(t *testing.T) {
+		const until = "2099-01-01"
+		budget("      waiver:\n        reason: the traffic shape this week\n        until: " + until + "\n")
+
+		code, findings := backtest(t)
+		if code != exitOK {
+			t.Fatalf("backtest exit = %d, want %d: a waived finding failed the build\nstderr:\n%s",
+				code, exitOK, findings)
+		}
+		// The finding is still reported, and it names the file the waiver was
+		// written in and the date it runs out.
+		for _, want := range []string{"waived", detector, filepath.Join(specs, config.Filename), until} {
+			if !strings.Contains(findings, want) {
+				t.Errorf("stderr = %q, want it to name %q", findings, want)
+			}
+		}
+	})
+
+	t.Run("a waiver past its date", func(t *testing.T) {
+		const until = "2020-01-01"
+		budget("      waiver:\n        reason: the traffic shape that week\n        until: " + until + "\n")
+
+		code, findings := backtest(t)
+		if code != exitFinding {
+			t.Fatalf("backtest exit = %d, want %d: an expired waiver let the build pass\nstderr:\n%s",
+				code, exitFinding, findings)
+		}
+		for _, want := range []string{"expired", detector, filepath.Join(specs, config.Filename), until} {
+			if !strings.Contains(findings, want) {
+				t.Errorf("stderr = %q, want it to name %q", findings, want)
+			}
+		}
+	})
 }

@@ -18,6 +18,14 @@
 // a header carries a tenant or a credential, and neither belongs in a
 // committed file. They stay flags.
 //
+// # A budget somebody can be over on purpose
+//
+// A detector over its budget has two ways through a pull request: tune it, or
+// raise the number. The second is how a budget rots, because the raise
+// outlives the incident that justified it. So a detector entry may carry a
+// [Waiver], which keeps the finding and the green build until a date and
+// fails the build after it.
+//
 // # Unset is not zero
 //
 // Every limit is a pointer. Zero is a budget somebody means, for a detector
@@ -109,6 +117,11 @@ type Limits struct {
 	// paging for, between zero and one. Nil is no limit.
 	MaxFiringRatio *float64 `json:"maxFiringRatio,omitempty"`
 
+	// Waiver is the detector being over these limits on purpose until a
+	// date. Nil is the usual case: a detector held to its budget. It is only
+	// ever a detector entry's, which [File.validate] is what enforces.
+	Waiver *Waiver `json:"waiver,omitempty"`
+
 	// EpisodesFrom and RatioFrom are the file each limit came from, filled
 	// by resolution and empty on a file as decoded. A finding names them,
 	// because "over budget" is not actionable until a reader knows which
@@ -183,6 +196,13 @@ func (f File) validate() error {
 		engines[target.Engine] = i
 	}
 
+	// A waiver over a file's defaults would waive every detector the file
+	// governs, including the ones nobody looked at, and the reason it states
+	// is about one of them.
+	if f.Budget.Waiver != nil {
+		return fmt.Errorf("budget.waiver waives every detector this file governs: write it on the detector it is about: %w",
+			ErrValue)
+	}
 	if err := f.Budget.validate("budget"); err != nil {
 		return err
 	}
@@ -193,6 +213,9 @@ func (f File) validate() error {
 			return err
 		}
 		if err := limits.looser(f.Budget.Limits, field); err != nil {
+			return err
+		}
+		if err := limits.Waiver.validate(field + ".waiver"); err != nil {
 			return err
 		}
 	}

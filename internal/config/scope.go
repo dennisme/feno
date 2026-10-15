@@ -157,7 +157,7 @@ func (s *Scope) read(directory string) (*File, error) {
 }
 
 // LimitsFor is the limits one file holds a detector to, carrying that file as
-// the origin of each one.
+// the origin of each one and of any waiver.
 func (f File) LimitsFor(detector string) Limits {
 	limits := f.Budget.For(detector)
 	if limits.MaxEpisodes != nil {
@@ -165,6 +165,13 @@ func (f File) LimitsFor(detector string) Limits {
 	}
 	if limits.MaxFiringRatio != nil {
 		limits.RatioFrom = f.Path
+	}
+	if waiver := f.Budget.Detectors[detector].Waiver; waiver != nil {
+		// A copy, so that stamping the file onto it does not reach the
+		// decoded file a scope holds for every other detector in the tree.
+		stamped := *waiver
+		stamped.From = f.Path
+		limits.Waiver = &stamped
 	}
 	return limits
 }
@@ -184,6 +191,14 @@ func (l Limits) tighten(other Limits) Limits {
 	if other.MaxFiringRatio != nil && (out.MaxFiringRatio == nil || *other.MaxFiringRatio < *out.MaxFiringRatio) {
 		out.MaxFiringRatio = other.MaxFiringRatio
 		out.RatioFrom = other.RatioFrom
+	}
+	// A waiver is not a limit and "stricter" does not order it, so the
+	// nearest file's waiver replaces the one above it. A team owns the
+	// detector and the reason it is over budget, and what holds the decision
+	// to an end is the expiry and the diff it was written in, not which file
+	// it was written in.
+	if other.Waiver != nil {
+		out.Waiver = other.Waiver
 	}
 	return out
 }

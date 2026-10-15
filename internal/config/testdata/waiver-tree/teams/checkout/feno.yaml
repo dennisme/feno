@@ -1,0 +1,7 @@
+budget:
+  maxEpisodes: 2
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: checkout's own black friday shape
+        until: 2026-12-05

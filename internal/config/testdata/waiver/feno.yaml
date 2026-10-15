@@ -1,0 +1,12 @@
+budget:
+  maxEpisodes: 4
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: black friday traffic shape, retuning after the freeze
+        until: 2026-12-05
+    search-latency:
+      maxEpisodes: 1
+      waiver:
+        reason: the index rebuild pages until it finishes
+        until: 2026-11-02T18:00:00+01:00

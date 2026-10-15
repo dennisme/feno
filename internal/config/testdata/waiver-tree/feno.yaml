@@ -1,0 +1,11 @@
+budget:
+  maxEpisodes: 4
+  detectors:
+    checkout-request-rate:
+      waiver:
+        reason: the platform team's freeze
+        until: 2026-11-01
+    other-detector:
+      waiver:
+        reason: the platform team waived one nobody below it names
+        until: 2026-11-01
