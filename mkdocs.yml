@@ -44,6 +44,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Running the gate in CI: ci.md
 
 # Fail the build on a link to a page that does not exist.
 strict: true

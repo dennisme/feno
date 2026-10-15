@@ -38,7 +38,7 @@ func TestRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			got := run(tt.args, &stdout, &stderr)
+			got := run(t.Context(), tt.args, &stdout, &stderr)
 			if got != tt.want {
 				t.Errorf("exit code = %d, want %d", got, tt.want)
 			}

@@ -25,7 +25,7 @@ const prometheusTarget = "prometheus"
 
 // generateCommand compiles detectors into rule files, or checks the files
 // already committed against what the specifications say they should be.
-func generateCommand(args []string, stdout, stderr io.Writer) int {
+func generateCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
 		fs           = flag.NewFlagSet("generate", flag.ContinueOnError)
 		paths        pathList
@@ -36,6 +36,7 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 		step         = fs.Duration("step", defaultStep, "the interval the rules will be evaluated at, which the bands are computed for")
 		check        = fs.Bool("check", false, "write nothing and fail if what is in the output directory is not what these specifications compile to")
 		configPath   = fs.String("config", "", "the "+config.Filename+" declaring the target; found by walking up from the specifications when unset")
+		timeout      = fs.Duration("request-timeout", prometheus.DefaultTimeout, timeoutUsage)
 		experimental = fs.Bool("experimental-functions", false,
 			"the server was started with --enable-feature=promql-experimental-functions, which is what gates mad_over_time")
 	)
@@ -90,7 +91,7 @@ func generateCommand(args []string, stdout, stderr io.Writer) int {
 
 	target := rules.Target{ExperimentalFunctions: *experimental}
 	if *url != "" {
-		probed, err := probe(*url, http.Header(headers), stderr)
+		probed, err := probe(ctx, *url, *timeout, http.Header(headers), stderr)
 		if err != nil {
 			printf(stderr, "%s\n", err)
 			return exitUsage
@@ -167,14 +168,15 @@ func given(fs *flag.FlagSet, name string) bool {
 // process was started, and nothing in a specification file can say. The
 // decision is said out loud because it changes the rules that come out, and a
 // rule that changed shape between two runs has to explain itself.
-func probe(url string, header http.Header, stderr io.Writer) (rules.Target, error) {
+func probe(ctx context.Context, url string, timeout time.Duration, header http.Header, stderr io.Writer) (rules.Target, error) {
 	client, err := prometheus.New(url)
 	if err != nil {
 		return rules.Target{}, err
 	}
 	client.Header = header
+	client.Timeout = timeout
 
-	capabilities, err := client.Probe(context.Background())
+	capabilities, err := client.Probe(ctx)
 	if err != nil {
 		return rules.Target{}, err
 	}

@@ -87,6 +87,7 @@ release-snapshot:
 promtool:
     command -v promtool >/dev/null 2>&1 || { echo "promtool not installed; run 'just init'"; exit 1; }
     promtool check rules --enable-feature=promql-experimental-functions internal/rules/testdata/golden/*.yml
+    promtool check rules --enable-feature=promql-experimental-functions examples/rules/*.yaml
     out=$(mktemp -d); \
     go run ./cmd/feno generate -f cmd/feno/testdata/detectors -o "$out" --experimental-functions >/dev/null; \
     promtool check rules --enable-feature=promql-experimental-functions "$out"/*.yaml; \
@@ -189,6 +190,95 @@ backtest-history:
     FENO_SLO_TOTAL_QUERY='sum(feno_requests_per_second)' \
         env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration \
             ./internal/backtest/ ./internal/suggest/ ./cmd/feno/
+
+# Run the gate against a public Prometheus nobody here operates.
+#
+# This is the one run that is not against a server this repository starts.
+# demo.promlabs.com is somebody else's Prometheus with a month of real
+# history, so what it proves is the thing no container can: that the gate
+# works against a server with its own version, its own flags, its own
+# latency and its own retention.
+#
+# Every exit code the gate produces is asserted here rather than described,
+# because the exit code is the whole interface a workflow has to feno.
+#
+# A server somebody else runs can be down, which is what exit 3 is for: the
+# first run reports it and this recipe stops rather than failing, because an
+# outage over there is not a finding over here.
+demo url="https://demo.promlabs.com":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Built rather than `go run`, which collapses every non-zero exit of the
+    # program it ran into its own 1 and would make three of the four codes
+    # below unobservable.
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    env -u GOROOT GOTOOLCHAIN=auto go build -o "$work/feno" ./cmd/feno
+
+    code() {
+        set +e
+        "$work/feno" "$@" >"$work/out" 2>"$work/err"
+        local status=$?
+        set -e
+        echo "$status"
+    }
+
+    expect() {
+        local want=$1 got=$2 what=$3
+        if [ "$got" != "$want" ]; then
+            echo "$what: exit $got, want $want"
+            cat "$work/out" "$work/err"
+            exit 1
+        fi
+        echo "$what: exit $got"
+    }
+
+    said() {
+        grep -q -- "$1" "$work/err" || { echo "stderr does not mention $1"; cat "$work/err"; exit 1; }
+    }
+
+    # The offline gates first. They need no server, so a datasource that is
+    # down never stops them running.
+    expect 0 "$(code generate -f examples/demo --check)" "drift gate"
+
+    status=$(code backtest -f examples/demo --url "{{url}}" --from -14d)
+    if [ "$status" = 3 ]; then
+        said "not reachable"
+        echo "demo: {{url}} is not answering; the gate degraded rather than failing"
+        exit 0
+    fi
+    expect 0 "$status" "within budget"
+    cat "$work/out"
+
+    expect 1 "$(code backtest -f examples/over-budget --url "{{url}}" --from -14d)" "over budget"
+    said "paging episodes, limit 0"
+
+    # A waiver on either side of its expiry, written here rather than
+    # committed, so the dates are never stale and both halves are proven on
+    # the same run.
+    waiver="$work/waivers"
+    mkdir -p "$waiver"
+    for when in "$(date -u -d '+1 day' +%F 2>/dev/null || date -u -v+1d +%F):waived:0" \
+                "$(date -u -d '-1 day' +%F 2>/dev/null || date -u -v-1d +%F):expired:1"; do
+        IFS=: read -r until name want <<<"$when"
+        cat >"$waiver/$name.yaml" <<YAML
+    budget:
+      maxEpisodes: 0
+      detectors:
+        demo-api-latency-aggressive:
+          waiver:
+            reason: the demo server is somebody else's, and this tree exists to show a red gate
+            until: $until
+    YAML
+        expect "$want" "$(code backtest -f examples/over-budget -config "$waiver/$name.yaml" --url "{{url}}" --from -14d)" "$name waiver"
+    done
+
+    # The fourth code, against a port nothing is listening on.
+    expect 3 "$(code backtest -f examples/demo --url http://127.0.0.1:1 --from -1d)" "unreachable"
+    said "not reachable"
+
+    echo "demo: every exit code the gate produces, against {{url}}"
 
 # Everything CI runs, in the order CI runs it.
 check: lint build test promtool markdownlint

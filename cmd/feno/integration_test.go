@@ -117,7 +117,7 @@ spec:
 `, good, total))
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"suggest",
+	code := run(t.Context(), []string{"suggest",
 		"--from-sli", slis,
 		"-f", specs,
 		"--url", url,
@@ -160,7 +160,7 @@ spec:
 	// reviewing by now.
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"suggest", "--from-sli", slis, "-f", specs, "--url", url, "-o", detectors},
+	if code := run(t.Context(), []string{"suggest", "--from-sli", slis, "-f", specs, "--url", url, "-o", detectors},
 		&stdout, &stderr); code != exitUsage {
 		t.Errorf("a second suggest exit = %d, want %d\n%s", code, exitUsage, stderr.String())
 	}
@@ -177,7 +177,7 @@ spec:
 	} {
 		stdout.Reset()
 		stderr.Reset()
-		if code := run(args, &stdout, &stderr); code != exitOK {
+		if code := run(t.Context(), args, &stdout, &stderr); code != exitOK {
 			t.Fatalf("%v exit = %d, want %d\nstdout:\n%s\nstderr:\n%s",
 				args, code, exitOK, stdout.String(), stderr.String())
 		}
@@ -187,7 +187,7 @@ spec:
 	// edited between drafting and a report.
 	stdout.Reset()
 	stderr.Reset()
-	code = run([]string{"backtest", "-f", specs, "--url", url, "--from", "-2d"}, &stdout, &stderr)
+	code = run(t.Context(), []string{"backtest", "-f", specs, "--url", url, "--from", "-2d"}, &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("backtest exit = %d, want %d\nstdout:\n%s\nstderr:\n%s",
 			code, exitOK, stdout.String(), stderr.String())
@@ -279,7 +279,7 @@ spec:
 	backtest := func(t *testing.T) (int, string) {
 		t.Helper()
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"backtest", "-f", specs, "--url", url, "--from", "-2d"}, &stdout, &stderr)
+		code := run(t.Context(), []string{"backtest", "-f", specs, "--url", url, "--from", "-2d"}, &stdout, &stderr)
 		t.Logf("report:\n%s", stdout.String())
 		return code, stderr.String()
 	}

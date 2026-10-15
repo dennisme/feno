@@ -21,7 +21,7 @@ func generated(t *testing.T) string {
 	out := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	if got := run([]string{"generate", "-f", "testdata/detectors", "-o", out}, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), []string{"generate", "-f", "testdata/detectors", "-o", out}, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 	return out
@@ -58,7 +58,7 @@ func TestGenerateWrites(t *testing.T) {
 func TestGenerateReportsDegradation(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"generate", "-f", "testdata/detectors", "-o", t.TempDir()}, &stdout, &stderr)
+	got := run(t.Context(), []string{"generate", "-f", "testdata/detectors", "-o", t.TempDir()}, &stdout, &stderr)
 	if got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
@@ -75,7 +75,7 @@ func TestGenerateCheck(t *testing.T) {
 	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--check"}
 
 	var stdout, stderr bytes.Buffer
-	if got := run(args, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 
@@ -95,7 +95,7 @@ func TestGenerateCheck(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		args := []string{"generate", "-f", "testdata/detectors", "-o", filepath.Dir(path), "--check"}
-		if got := run(args, &stdout, &stderr); got != exitFinding {
+		if got := run(t.Context(), args, &stdout, &stderr); got != exitFinding {
 			t.Fatalf("exit code = %d, want %d", got, exitFinding)
 		}
 		if !strings.Contains(stderr.String(), "checkout.yaml") {
@@ -111,7 +111,7 @@ func TestGenerateCheck(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		args := []string{"generate", "-f", "testdata/detectors", "-o", dir, "--check"}
-		if got := run(args, &stdout, &stderr); got != exitFinding {
+		if got := run(t.Context(), args, &stdout, &stderr); got != exitFinding {
 			t.Fatalf("exit code = %d, want %d", got, exitFinding)
 		}
 	})
@@ -125,7 +125,7 @@ func TestGenerateCheck(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		args := []string{"generate", "-f", "testdata/detectors", "-o", dir, "--check"}
-		if got := run(args, &stdout, &stderr); got != exitFinding {
+		if got := run(t.Context(), args, &stdout, &stderr); got != exitFinding {
 			t.Fatalf("exit code = %d, want %d", got, exitFinding)
 		}
 		if !strings.Contains(stderr.String(), "deleted-detector.yaml") {
@@ -138,7 +138,7 @@ func TestGenerateCheck(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		args := []string{"generate", "-f", "testdata/detectors", "-o", dir, "--check"}
-		if got := run(args, &stdout, &stderr); got != exitFinding {
+		if got := run(t.Context(), args, &stdout, &stderr); got != exitFinding {
 			t.Fatalf("exit code = %d, want %d", got, exitFinding)
 		}
 		entries, err := os.ReadDir(dir)
@@ -195,7 +195,7 @@ func TestGenerateFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			got := run(append([]string{"generate"}, tt.args...), &stdout, &stderr)
+			got := run(t.Context(), append([]string{"generate"}, tt.args...), &stdout, &stderr)
 			if got != exitUsage {
 				t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitUsage, stderr.String())
 			}
@@ -271,7 +271,7 @@ func TestGenerateProbesTarget(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--url", url}
-			if got := run(args, &stdout, &stderr); got != exitOK {
+			if got := run(t.Context(), args, &stdout, &stderr); got != exitOK {
 				t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 			}
 
@@ -300,7 +300,7 @@ func TestGenerateProbeSendsHeaders(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	args := []string{"generate", "-f", "testdata/detectors", "-o", t.TempDir(),
 		"--url", url, "--header", "X-Scope-OrgID=team-checkout"}
-	if got := run(args, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 
@@ -321,7 +321,7 @@ func TestGenerateProbeFailureWritesNothing(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--url", url}
-	if got := run(args, &stdout, &stderr); got == exitOK {
+	if got := run(t.Context(), args, &stdout, &stderr); got == exitOK {
 		t.Fatalf("exit code = %d, want a failure\nstderr: %s", got, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "mad_over_time") {
@@ -362,7 +362,7 @@ func TestGenerateOutputFromConfig(t *testing.T) {
 	// -f names the tree the target is declared in, and internal/spec walks
 	// it, so the specifications may sit a directory below the file.
 	var stdout, stderr bytes.Buffer
-	if got := run([]string{"generate", "-f", root}, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), []string{"generate", "-f", root}, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 
@@ -392,7 +392,7 @@ func TestGenerateOutputFlagBeatsConfig(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "-config", filepath.Join(root, config.Filename)}
-	if got := run(args, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(out, "checkout.yaml")); err != nil {
@@ -408,11 +408,30 @@ func TestGenerateOutputFlagBeatsConfig(t *testing.T) {
 func TestGenerateNoOutputAnywhere(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"generate", "-f", "testdata/detectors"}, &stdout, &stderr)
+	got := run(t.Context(), []string{"generate", "-f", "testdata/detectors"}, &stdout, &stderr)
 	if got != exitUsage {
 		t.Errorf("exit code = %d, want %d", got, exitUsage)
 	}
 	if !strings.Contains(stderr.String(), config.Filename) {
 		t.Errorf("stderr = %q, want it to name %s", stderr.String(), config.Filename)
+	}
+}
+
+// TestGenerateDeadline covers the probe, which is the one read generate
+// makes. It exits as any other unusable --url does, and the point here is
+// that it exits at all.
+func TestGenerateDeadline(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	got := run(t.Context(), []string{
+		"generate", "-f", "testdata/detectors", "-o", t.TempDir(),
+		"--url", hung(t), "--request-timeout", "50ms",
+	}, &stdout, &stderr)
+
+	if got != exitUsage {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitUsage, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "probing") {
+		t.Errorf("stderr = %q, want it to name the probe that could not finish", stderr.String())
 	}
 }

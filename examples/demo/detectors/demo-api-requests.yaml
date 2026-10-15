@@ -1,0 +1,21 @@
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: demo-api-requests
+spec:
+  indicator:
+    metadata:
+      name: demo-api-requests
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Prometheus
+          spec:
+            query: sum(rate(demo_api_request_duration_seconds_count[5m]))
+  detection:
+    strategy: adaptive
+    class: requests
+    sensitivity: balanced
+    window: 1h
+  alerting:
+    for: 10m

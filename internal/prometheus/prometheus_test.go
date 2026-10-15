@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -472,5 +473,141 @@ func TestUnreachable(t *testing.T) {
 
 	if Unreachable(nil) {
 		t.Error("Unreachable(nil) = true")
+	}
+}
+
+// hung starts a listener that accepts a connection and never writes a byte,
+// which is the failure a deadline exists for. A refused connection fails in
+// microseconds and a fixture cannot be slow, so neither of them is evidence
+// that a read ever gives up.
+func hung(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+
+	accepted := make(chan net.Conn, 16)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				close(accepted)
+				return
+			}
+			accepted <- conn
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+		for conn := range accepted {
+			_ = conn.Close()
+		}
+	})
+	return "http://" + listener.Addr().String()
+}
+
+// TestTimeout proves every read gives up on a server that accepts and never
+// answers, and that giving up is classified as a server nobody reached rather
+// than as an answer.
+func TestTimeout(t *testing.T) {
+	reads := []struct {
+		name string
+		read func(*Client) error
+	}{
+		{"QueryRange", func(c *Client) error {
+			_, err := c.QueryRange(context.Background(), "up", at(0), at(10), step)
+			return err
+		}},
+		{"Query", func(c *Client) error {
+			_, err := c.Query(context.Background(), "up", at(0))
+			return err
+		}},
+		{"Probe", func(c *Client) error {
+			_, err := c.Probe(context.Background())
+			return err
+		}},
+	}
+
+	address := hung(t)
+	for _, read := range reads {
+		t.Run(read.name, func(t *testing.T) {
+			client, err := New(address)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			client.Timeout = 50 * time.Millisecond
+
+			err = read.read(client)
+			if err == nil {
+				t.Fatal("read against a server that never answers returned no error")
+			}
+			if !Unreachable(err) {
+				t.Errorf("Unreachable(%v) = false, want true", err)
+			}
+		})
+	}
+}
+
+// TestTimeoutDefault pins the deadline to the client rather than to the
+// command, so a caller that builds one directly is not the one case with no
+// deadline at all.
+func TestTimeoutDefault(t *testing.T) {
+	client, err := New("http://localhost:9090")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if client.Timeout != DefaultTimeout {
+		t.Errorf("Timeout = %v, want %v", client.Timeout, DefaultTimeout)
+	}
+}
+
+// TestTimeoutDisabled covers the laptop asking a slow server for a quarter of
+// history on purpose.
+func TestTimeoutDisabled(t *testing.T) {
+	client, _ := serve(t, http.StatusOK, "matrix.json")
+	client.Timeout = 0
+
+	if _, err := client.QueryRange(context.Background(), "up", at(0), at(10), step); err != nil {
+		t.Fatalf("QueryRange with no deadline: %v", err)
+	}
+}
+
+// TestCancelIsNotUnreachable keeps an interrupted run out of the skipped
+// bucket. Somebody pressed Ctrl-C; the server was never asked whether it was
+// there.
+func TestCancelIsNotUnreachable(t *testing.T) {
+	client, err := New(hung(t))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = client.QueryRange(ctx, "up", at(0), at(10), step)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got error %v, want %v", err, context.Canceled)
+	}
+	if Unreachable(err) {
+		t.Errorf("Unreachable(%v) = true, want false", err)
+	}
+
+	// The same answer for a cancel that lands while a request is in flight,
+	// where the transport reports it as a failed connection.
+	inflight, cancelInflight := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancelInflight()
+	}()
+
+	_, err = client.QueryRange(inflight, "up", at(0), at(10), step)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got error %v, want %v", err, context.Canceled)
+	}
+	if Unreachable(err) {
+		t.Errorf("Unreachable(%v) = true, want false: the run was interrupted", err)
 	}
 }

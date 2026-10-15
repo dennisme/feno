@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dennisme/feno/internal/buildinfo"
 )
@@ -26,6 +29,10 @@ const (
 	exitSkipped = 3
 )
 
+// timeoutUsage is the one description of --request-timeout, which every
+// command that reads a server carries.
+const timeoutUsage = "how long one request waits for an answer; 0 waits forever"
+
 // printf writes diagnostic output. A write to stdout or stderr that fails
 // leaves nowhere to report the failure, so the error is dropped rather than
 // checked at every call site.
@@ -34,12 +41,17 @@ func printf(w io.Writer, format string, args ...any) {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	// The signal cancels the read in flight rather than killing the process,
+	// so a run interrupted after seven of eight reports keeps the seven.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // run holds the dispatch so a test can drive the whole binary without a
 // process.
-func run(args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printf(stderr, "%s\n", "usage: feno <suggest|generate|backtest|version>")
 		return exitUsage
@@ -47,11 +59,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	switch args[0] {
 	case "generate":
-		return generateCommand(args[1:], stdout, stderr)
+		return generateCommand(ctx, args[1:], stdout, stderr)
 	case "backtest":
-		return backtestCommand(args[1:], stdout, stderr)
+		return backtestCommand(ctx, args[1:], stdout, stderr)
 	case "suggest":
-		return suggestCommand(args[1:], stdout, stderr)
+		return suggestCommand(ctx, args[1:], stdout, stderr)
 	case "version":
 		printf(stdout, "%s", buildinfo.Get())
 		return exitOK

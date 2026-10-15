@@ -1,0 +1,85 @@
+# The gate, run the way a team would run it, against a Prometheus nobody here
+# operates. docs/ci.md is the page this file is the example for; the two are
+# meant to be read together.
+name: Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Nothing in this repository changes when demo.promlabs.com does, and the
+  # run is still worth having when it does: a daily one catches a server that
+  # started answering differently without a commit here to blame.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # What a team copies. Two offline checks that always block, then the
+  # budget, which degrades to exit 3 when the datasource is out of reach.
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install pinned promtool
+        uses: jdx/mise-action@v5
+        with:
+          install_args: promtool
+
+      - name: Build feno
+        run: go build -o feno ./cmd/feno
+
+      - name: Drift gate
+        run: ./feno generate -f examples/demo --check
+
+      - name: Check the committed rules
+        run: promtool check rules examples/rules/*.yaml
+
+      # The exit code is the whole interface, so it is read rather than left
+      # to fail the step: 0 passes, 1 fails, and 3 is a datasource nobody
+      # reached, which is a warning and not a finding. A repository whose
+      # datasource is its own, rather than somebody else's demo, is the one
+      # that should consider failing on 3 instead.
+      - name: Noise budget
+        run: |
+          set +e
+          ./feno backtest -f examples/demo --url https://demo.promlabs.com --from -14d
+          code=$?
+          set -e
+          case $code in
+            0) echo "::notice::every detector is within its budget" ;;
+            3) echo "::warning::the datasource was not reachable, so the noise budget went unchecked" ;;
+            *) exit $code ;;
+          esac
+
+  # Every exit code the gate produces, asserted against the same real server
+  # rather than described in a document. A code that changed meaning without
+  # this failing would be a workflow somewhere reading the wrong answer.
+  exit-codes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Run the gate against a public Prometheus
+        run: just demo
