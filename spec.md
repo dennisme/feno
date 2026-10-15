@@ -979,6 +979,42 @@ budget somebody can drop by editing a workflow file is not a budget, and the
 same argument applies here as applies to check severities living in a policy
 file in clickhouse-ruler.
 
+### A server that accepts and never answers
+
+Decided 2026-10-14. Every read carries a per-request deadline, defaulting to
+30 seconds and set by `--request-timeout`. Zero disables it, which is for a
+laptop asking a slow server for a quarter of history on purpose.
+
+The deadline is per request and not per run because of what exit 3 claims. A
+run that reached its deadline halfway through reported some detectors and not
+others, and exiting 3 on it would say nobody checked when somebody partly did.
+A per-request deadline has no such half state: either a request was answered
+or the server never answered one, and the second is the same finding as a
+connection refused. So a deadline that fires exits 3, with the server and the
+elapsed time named, and takes the same degraded path a connection refused
+takes.
+
+Thirty seconds is a default and not a limit. A chunk of a month-long range
+query against a loaded Mimir can take longer, and a team that finds it can
+raise it in the one flag. What the default is for is the other failure: a
+server that accepts a connection and never writes a byte, which without a
+deadline hangs a CI job until the runner's own timeout kills it with nothing
+printed.
+
+Interrupting a run prints what it already computed. `feno backtest` over eight
+detectors has written seven reports by the time somebody loses patience, and
+throwing them away on Ctrl-C makes the eighth detector's cost the whole run's
+cost. The signal cancels the read in flight, the reports already written stay
+written, and the run exits 3: an interrupted gate did not find a clean budget,
+and it did not find a broken one either.
+
+The read stays serial, for the reason `internal/prometheus` already gives: the
+target is somebody's production monitoring. Whether a backtest over many
+detectors wants to fan out is a question for after the first real run against
+a server feno does not own, and the number that run produces. Until then there
+is no flag, because a concurrency knob shipped before the measurement is a
+guess somebody has to keep.
+
 ### More than one team in one repository
 
 A repository with a team per directory has a budget per team, and one pull
