@@ -55,7 +55,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,6 +73,15 @@ const (
 	queryRangePath = "api/v1/query_range"
 	queryPath      = "api/v1/query"
 )
+
+// DefaultTimeout is how long one request waits for an answer.
+//
+// Thirty seconds is a default and not a limit: a chunk of a month-long range
+// query against a loaded server can legitimately take longer, and the caller
+// raises it. What the default is for is the other failure, a server that
+// accepts a connection and never writes a byte, which without a deadline
+// hangs a CI job until the runner kills it with nothing printed.
+const DefaultTimeout = 30 * time.Second
 
 // Point is one sample: when it was evaluated and what it was worth. Value can
 // be NaN or an infinity, because the server reports those and a backtest that
@@ -117,10 +125,18 @@ type Result struct {
 // MaxPointsPerSeries overrides the resolution limit requests are planned
 // against. Zero means the Prometheus default, and the reason to set it is a
 // server configured lower than that.
+//
+// Timeout is how long one request waits, not how long a run may take. A
+// deadline over the whole run has a half-finished state, where some detectors
+// were reported and some were not, and the exit code a caller has for an
+// unreachable server would be a lie about that run. One request either got an
+// answer or got nothing, which is the same finding as a refused connection.
+// Zero waits forever.
 type Client struct {
 	HTTP               *http.Client
 	Header             http.Header
 	MaxPointsPerSeries int
+	Timeout            time.Duration
 
 	base *url.URL
 }
@@ -138,7 +154,7 @@ func New(baseURL string) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("base url %q: no host", baseURL)
 	}
-	return &Client{base: u}, nil
+	return &Client{base: u, Timeout: DefaultTimeout}, nil
 }
 
 // QueryRange evaluates query at every step between start and end.
@@ -235,6 +251,12 @@ func (c *Client) Query(ctx context.Context, query string, at time.Time) (*Result
 // characters and a GET of it meets a proxy's URL length limit as a 414 that
 // looks like the query is wrong.
 func (c *Client) post(ctx context.Context, endpoint *url.URL, form url.Values) (int, []byte, error) {
+	if c.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(),
 		strings.NewReader(form.Encode()))
 	if err != nil {
@@ -275,7 +297,7 @@ func formatTime(t time.Time) string {
 
 // Unreachable reports an error that means the server was never spoken to: a
 // name that does not resolve, a connection refused or reset, a dial or a read
-// that timed out.
+// that timed out, or a request that reached [Client.Timeout] with no answer.
 //
 // It is the question a CI gate asks before deciding whether it ran. A backtest
 // that cannot reach a datasource is a check that was skipped, and a backtest
@@ -286,13 +308,28 @@ func formatTime(t time.Time) string {
 // a rejected query are all configuration to fix rather than a missing network
 // path, so none of them is this, and a TLS handshake that failed is a
 // certificate to fix rather than an absent server.
+//
+// An interrupted run is not this. Somebody pressed Ctrl-C, and the server was
+// never asked whether it was there, so a cancelled context reports false
+// however far down a chain it sits.
 func Unreachable(err error) bool {
 	if err == nil {
 		return false
 	}
 	var (
-		dns *net.DNSError
-		op  *net.OpError
+		dns     *net.DNSError
+		op      *net.OpError
+		timeout interface{ Timeout() bool }
 	)
-	return errors.As(err, &dns) || errors.As(err, &op) || os.IsTimeout(err)
+	switch {
+	case errors.Is(err, context.Canceled):
+		return false
+	case errors.As(err, &dns), errors.As(err, &op):
+		return true
+	case errors.Is(err, context.DeadlineExceeded):
+		return true
+	case errors.As(err, &timeout):
+		return timeout.Timeout()
+	}
+	return false
 }
