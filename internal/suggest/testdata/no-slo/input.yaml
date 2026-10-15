@@ -1,0 +1,13 @@
+# An SLI nobody has written an objective over yet. A draft from it is still
+# worth having, and carries no sloRef, which is what makes a backtest report
+# say nobody tied this detector to a budget.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: queue-depth
+spec:
+  thresholdMetric:
+    metricSource:
+      metricSourceRef: mimir-prod
+      spec:
+        query: max(rabbitmq_queue_messages_ready{queue="checkout"})

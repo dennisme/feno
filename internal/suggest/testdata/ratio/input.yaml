@@ -1,0 +1,36 @@
+# A ratio SLI, which is the shape most real SLIs have. The drafted detector
+# bands the ratio's total rather than the ratio: a band over the ratio
+# duplicates the burn alert, and a band over the traffic catches the drop in
+# requests that a ratio cannot see at all.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-availability
+spec:
+  ratioMetric:
+    counter: true
+    good:
+      metricSource:
+        metricSourceRef: mimir-prod
+        spec:
+          query: sum(rate(http_requests_total{service="checkout",code!~"5.."}[5m]))
+    total:
+      metricSource:
+        metricSourceRef: mimir-prod
+        spec:
+          query: sum(rate(http_requests_total{service="checkout"}[5m]))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-availability
+spec:
+  service: checkout
+  indicatorRef: checkout-availability
+  budgetingMethod: Occurrences
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - displayName: 99.9% of checkout requests succeed
+      target: 0.999

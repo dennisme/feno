@@ -441,6 +441,15 @@ func mean(vs []float64) float64 {
 	return sum / float64(len(vs))
 }
 
+// StdDev is the spread the adaptive strategy takes, over a set of samples
+// whose mean it computes itself.
+//
+// It is exported for the same reason [IQRToSigma] is: a profile that picks a
+// strategy by comparing this against the robust scale has to be measuring
+// the same two numbers the band will be built from, and a second
+// implementation of either would make that comparison about itself.
+func StdDev(vs []float64) float64 { return stddev(vs, mean(vs)) }
+
 // stddev divides by the sample count rather than one less, which is what
 // `stddev_over_time` does. The difference is small on a full window and is
 // not the point: the point is that the backtest and the rule use the same
@@ -453,6 +462,14 @@ func stddev(vs []float64, mean float64) float64 {
 	}
 	return math.Sqrt(sum / float64(len(vs)))
 }
+
+// Quantile is [quantile] over a slice the caller has already sorted.
+//
+// Exported because the median and the interquartile range of a profiled
+// series have to be taken the same way the robust band takes them. A profile
+// using a different convention, such as averaging the middle pair of an even
+// count, would report a scale the band will not use.
+func Quantile(q float64, sorted []float64) float64 { return quantile(q, sorted) }
 
 // quantile interpolates linearly between the two values either side of
 // q*(n-1) in a sorted slice, which is how Prometheus computes

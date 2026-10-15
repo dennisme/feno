@@ -1,0 +1,53 @@
+# Drafted by feno v1.2.3 from SLI checkout-latency in
+#   testdata/threshold/input.yaml. Review every field before committing it.
+#   Nothing here was written by a model.
+#
+# Series banded: thresholdMetric
+# Profiled: 1 series over 2026-09-23T00:00:00Z to 2026-10-14T00:00:00Z at a 5m
+#   step
+#
+# class latency: read from the names in the query, which is a guess and not a
+#   measurement. Nothing in the band reads it, so correcting it costs nothing
+#   but is worth doing
+# strategy robust: the median series' standard deviation is 3 times its
+#   interquartile scale, at or above the 1.5 that says spikes are setting the
+#   width
+# seasonality daily: autocorrelation of the median series, daily at 0.78, over
+#   the 0.50 threshold; no weekly shape, 0.21 against the 0.50 threshold
+# sensitivity balanced: not profiled. How many units of scale is a policy about
+#   who gets paged, not a property of the series
+# coverage 99.5%: the median of 1 series over 6049 instants, measured at the
+#   profile's step and not at the step a ruler will evaluate at
+#
+# window, minCoverage and minWidth are absent, so feno's own defaults apply.
+#   minWidth has no default and none is drafted: it is a floor in this series'
+#   own units, which is a judgement about how large a change is worth paging for
+#   rather than something a profile can measure.
+#
+# sloRef checkout-latency: the one SLO naming this SLI, so the link is
+#   unambiguous. It is what lets a backtest say whether this detector's paging
+#   coincided with that budget burning.
+#
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-latency
+spec:
+  description: Drafted from SLI checkout-latency, thresholdMetric.
+  sloRef: checkout-latency
+  indicator:
+    metadata:
+      name: checkout-latency
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: |-
+              histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m])))
+  detection:
+    strategy: robust
+    sensitivity: balanced
+    seasonality:
+      - daily
+    class: latency

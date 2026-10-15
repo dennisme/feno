@@ -94,7 +94,21 @@ func (d Detector) SourceType() string {
 // this loader loses half its contents.
 type Bundle struct {
 	Detectors []Detector
-	Objects   []openslo.Object
+	Objects   []Object
+}
+
+// Object is one OpenSLO document and the file it was read from.
+//
+// The file is here for the same reason [Detector.File] is: a command that
+// derives something from one of these documents has to be able to say which
+// document, and a name alone does not locate it in a tree that holds
+// hundreds. go-sdk's own types carry no such field and should not: where a
+// document was read from is this loader's knowledge, not the kind's.
+type Object struct {
+	openslo.Object
+
+	// File is the path the document was read from.
+	File string
 }
 
 // Load reads every YAML document under the given paths, which may be files
@@ -184,7 +198,9 @@ func Load(paths ...string) (Bundle, error) {
 						slis[typed.Metadata.Name] = &typed
 					}
 				}
-				bundle.Objects = append(bundle.Objects, objects...)
+				for _, object := range objects {
+					bundle.Objects = append(bundle.Objects, Object{Object: object, File: file})
+				}
 
 			default:
 				return Bundle{}, fmt.Errorf("%s: apiVersion %q kind %q: %w",

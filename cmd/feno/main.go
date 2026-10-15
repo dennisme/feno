@@ -41,7 +41,7 @@ func main() {
 // process.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printf(stderr, "%s\n", "usage: feno <generate|backtest|version>")
+		printf(stderr, "%s\n", "usage: feno <suggest|generate|backtest|version>")
 		return exitUsage
 	}
 
@@ -50,11 +50,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return generateCommand(args[1:], stdout, stderr)
 	case "backtest":
 		return backtestCommand(args[1:], stdout, stderr)
+	case "suggest":
+		return suggestCommand(args[1:], stdout, stderr)
 	case "version":
 		printf(stdout, "%s", buildinfo.Get())
 		return exitOK
 	default:
-		printf(stderr, "unknown command %q, want generate, backtest or version\n", args[0])
+		printf(stderr, "unknown command %q, want suggest, generate, backtest or version\n", args[0])
 		return exitUsage
 	}
 }

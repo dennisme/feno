@@ -8,7 +8,36 @@ The name is for phenology, the study of when recurring natural events happen.
 Seasonality is the whole problem: a metric is not anomalous because it is
 high, it is anomalous because it is high for a Tuesday at 03:00.
 
-## Status: both commands run against Prometheus
+## Status: three commands run against Prometheus
+
+`feno suggest` drafts a detector from an SLI somebody already wrote, which is
+the cheapest useful thing in the tool: a team keeping SLOs in git has already
+said where the metrics live and which query matters, so the first detector
+costs them a review rather than an authoring session.
+
+```bash
+feno suggest --from-sli slis/ -f specs/ --url http://mimir/prometheus -o detectors/
+```
+
+It profiles each SLI's series over three weeks and decides from what it
+measured: `seasonality` from the autocorrelation at a day and at a week,
+`strategy` from how far the standard deviation sits above the interquartile
+scale, `class` from the names in the query. Every one of those lines, and the
+evidence behind it, is a comment in the draft, so the first thing a reviewer
+reads is the argument rather than the conclusion. `window`, `minCoverage` and
+`minWidth` are left absent so feno's own defaults apply, because a number in a
+draft that nothing measured is a number nobody should trust.
+
+A ratio SLI contributes its `total`, the traffic, not the ratio. The burn
+alert already watches the ratio against the objective; what no ratio can see
+is its own denominator collapsing while every remaining request succeeds. A
+series too sparse, too spiky or too flat to band is refused with the
+measurement behind it, and a run where nothing was worth drafting exits 1.
+
+`sloRef` is set when exactly one SLO in the tree names the SLI. Two SLOs over
+one SLI is a link no draft can resolve, so the field is left out and the
+candidates go in the header for a person to pick from. Nothing in the drafting
+path calls out to a model.
 
 `feno backtest` replays a detector over real history and prints the report.
 It needs a URL and read access, writes nothing, and exits 1 when a detector is
@@ -139,10 +168,13 @@ feno generate -f detectors/ -o rules/anomaly/ --url http://mimir/prometheus
 | `internal/episode` | Turns band breaches into the episodes a person would have been paged for, matching how Prometheus runs `for`, and intersects those episodes with another timeline |
 | `internal/rules` | Compiles a band into Prometheus recording and alerting rules, and a linked SLO into the burn query the budget overlap is read from, refusing what PromQL cannot express rather than approximating it |
 | `internal/config` | Reads `feno.yaml`: the repository's targets and its noise budget, with a limit per detector where one default will not do |
+| `internal/suggest` | Profiles an SLI's series over a stated window, decides the fields nobody can fill in from the document alone, and renders the draft a person reviews |
 | `internal/backtest` | Ties the others together: the query range a band's lookback demands, the second read the budget overlap is an intersection with, the aggregation across the series one query returns, and the report a person reads |
 
 Specification to band to episodes to report is `backtest`, and specification
-to band to rules is `generate`. What is missing is the ClickHouse target.
+to band to rules is `generate`. SLI to profile to draft is `suggest`, which is
+where a specification comes from in the first place. What is missing is the
+ClickHouse target.
 
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.
@@ -162,7 +194,13 @@ have done.
 
 ## What it will do
 
-Two commands over one specification.
+Three commands over one specification.
+
+`feno suggest` drafts that specification from an SLI already in the
+repository, profiling the series it names and writing down the evidence behind
+every field it decided. It is an authoring aid and not part of the pipeline:
+the draft is reviewed, edited and committed, and the committed document is the
+only source of truth.
 
 `feno generate` compiles a detector into recording and alerting rules for an
 engine you already run. Prometheus, Mimir, Thanos and the stores that speak
@@ -203,7 +241,10 @@ underneath.
 5. `generate`, which is the command over `internal/rules`
 6. The budget overlap, which is a second read of the same window against the
    burn signal compiled from the SLO a detector links to
-7. The ClickHouse target, which depends on four changes in clickhouse-ruler
+7. `suggest`, which is where the specification the other five steps read comes
+   from, and which could not be built earlier: a draft is only worth having if
+   the thing it drafts can be backtested, so the backtester had to exist first
+8. The ClickHouse target, which depends on four changes in clickhouse-ruler
 
 Steps 2 and 4 came before step 1 because both are pure functions over numbers
 and a time range, so they could be pinned by tests without a specification

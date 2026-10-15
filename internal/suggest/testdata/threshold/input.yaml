@@ -1,0 +1,29 @@
+# An SLI measured by a single query, with one SLO over it. Drafting from this
+# needs no choice about which series to band: there is one.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: checkout-latency
+spec:
+  thresholdMetric:
+    metricSource:
+      metricSourceRef: mimir-prod
+      spec:
+        query: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{service="checkout"}[5m])))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: checkout-latency
+spec:
+  service: checkout
+  indicatorRef: checkout-latency
+  budgetingMethod: Occurrences
+  timeWindow:
+    - duration: 28d
+      isRolling: true
+  objectives:
+    - displayName: 99% of checkout requests are served in under half a second
+      op: lte
+      value: 0.5
+      target: 0.99

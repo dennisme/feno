@@ -31,10 +31,15 @@
 //
 // `ratioMetric` is rejected on a detector rather than supported. A ratio is
 // two or three queries and internal/detect reads one series, so a band over
-// a ratio has to be a band over a query that already computes the ratio.
-// Composing good and total into one query is a judgement about what the
-// ratio means, which belongs in `suggest` where a person reviews the draft,
-// not in a loader that would do it silently.
+// a ratio would have to be a band over a query that already computes the
+// ratio, and composing good and total into one is a judgement about what the
+// ratio means that a loader has no business making silently.
+//
+// internal/suggest does not make it either. Drafting from a ratio SLI takes
+// the ratio's `total`, because the burn alert already watches the ratio
+// against the objective and what no ratio can see is its own denominator
+// collapsing. So a detector watches one series because that is what a band
+// is over, and the one series a ratio contributes is its traffic.
 //
 // # Two dependencies, and what each one is for
 //
