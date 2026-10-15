@@ -1,0 +1,5 @@
+budget:
+  detectors:
+    checkout-request-rate:
+      waiver:
+        until: 2026-12-05

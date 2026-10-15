@@ -1,0 +1,5 @@
+budget:
+  maxEpisodes: 4
+  waiver:
+    reason: black friday traffic shape
+    until: 2026-12-05

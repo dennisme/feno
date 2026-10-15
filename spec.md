@@ -1014,8 +1014,6 @@ a budget per team that file is often not the one the author has open, and
 
 ### Over budget on purpose
 
-Not implemented. The loader it needs exists.
-
 A detector over its budget has two ways through a pull request: tune it until
 it fits, or raise the number. Tuning is the outcome the gate is for. Raising
 the number is one reviewed line, which sounds acceptable and is how a budget
@@ -1036,15 +1034,55 @@ budget:
         until: 2026-12-05
 ```
 
-The vocabulary is clickhouse-ruler's on purpose. Its convention checks are
-exempted the same way, with a reason and an expiry that fails the build once it
-passes, and two tools in the same pipeline answering this question differently
-costs more than either answer.
+One waiver covers both limits on the detector it is written under. A waiver is
+about an incident and not about a metric, so a freeze that put the episode
+count over put the firing ratio over with it, and two reasons and two dates
+for one freeze is a form nobody fills in honestly.
 
-An expiry rather than a permanent override is the whole idea. A permanent
-override is the raised number with extra words on it. A date is a promise
-somebody has to keep or renew in a diff a reviewer sees, and a renewal that
-keeps happening is the signal that the detector is the problem.
+It is only ever a detector's. A waiver over a file's defaults would waive
+every detector the file governs, including the ones nobody looked at, so it is
+refused at load.
+
+Both fields are required. A waiver nobody explained cannot be reviewed when it
+comes up for renewal, and one with no expiry is the raised number with extra
+words on it. `until` is a date, read as midnight UTC so that a waiver does not
+expire at a different moment in CI than on a laptop, or an RFC3339 timestamp
+for a waiver that runs out at a deploy rather than at midnight. The instant
+itself is expired, so `until: 2026-12-05` covers the fourth and not the fifth.
+There is no maximum: a date in 2099 is visible in the diff that wrote it and
+in every run's output after that, which is the same reviewer the whole design
+rests on.
+
+A waiver is not a limit, and "stricter" does not order it, so it takes no part
+in the merge the limits go through. Every file on the walk may carry one and
+the nearest wins, which means a team may waive a ceiling the repository set
+for a detector it owns. What holds that to an end is the expiry, the diff it
+was written in and the CODEOWNERS line over it, not which file it sits in. The
+alternative makes whoever owns the top of the tree the bottleneck for every
+team's freeze, and a waiver nobody can get merged in time is a raised number
+instead.
+
+A waived run exits 0, because what a waiver buys is a green build. The finding
+is still printed, named as waived, with the file the waiver was written in and
+the date it runs out:
+
+```console
+$ feno backtest -f alerting/ --url http://mimir/prometheus --from -14d
+waived: checkout-request-rate: 10 paging episodes, limit 4 (alerting/teams/checkout/feno.yaml)
+the waiver in alerting/teams/checkout/feno.yaml runs out on 2026-12-05T00:00:00Z: black friday traffic shape, retuning after the freeze
+```
+
+Past the date it is a finding of its own and the build fails, whether or not
+the detector is still over budget. A waiver whose date has passed on a
+detector somebody tuned is a line that means nothing, and the build failing is
+what gets it deleted rather than renewed out of habit.
+
+The reason, the expiry and the line about the offline gates are
+clickhouse-ruler's on purpose: two tools in the same pipeline answering this
+question differently costs more than either answer. The shape is not shared,
+and the word is different to say so. An exemption there names a check from a
+registry of checks, and here there is no registry, only the two numbers a
+budget holds a detector to.
 
 Nothing in the file waives the offline gates. `generate --check` and `promtool`
 are correctness, and a rule that fails either cannot do its job, which is the
