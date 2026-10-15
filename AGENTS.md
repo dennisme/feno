@@ -36,7 +36,7 @@ just build            # go build ./...
 just coverage         # coverage across the tree
 just promtool         # promtool check rules over every generated rule file
 just smoketest        # the capability probe against two real Prometheus servers
-just backtest-history # the backtest against a Prometheus holding a month of history
+just backtest-history # suggest, generate and backtest against a month of real history
 just markdownlint     # markdownlint-cli2 over the docs
 just docs-serve       # preview the documentation site locally
 just init             # mise tool versions and pre-commit hooks
@@ -54,6 +54,27 @@ go run ./cmd/feno backtest -f detectors/ --url http://localhost:9090 --from -30d
 `version` prints the release tag, the commit and whether the tree was dirty.
 The tag comes from `-ldflags "-X .../internal/buildinfo.Version=<tag>"` at
 release time and reads `dev` otherwise; the rest comes from the toolchain.
+
+`suggest` drafts a detector per SLI and writes it out for review. It profiles
+each SLI's series over a stated window and decides seasonality, strategy and
+class from what it measured, leaving the fields no profile can measure absent
+so internal/spec's defaults apply. `--url` is required: there is no offline
+draft, because a field nothing measured is a field nobody should trust. A
+ratio SLI contributes its `total` rather than a composed ratio, and a series
+no band suits is refused with the measurement behind it. A run that drafted
+nothing exits 1 and an unreachable datasource exits 3. Drafts go to stdout
+unless `-o` names a directory, and a file already there is refused by name
+unless `--force`.
+
+```bash
+go run ./cmd/feno suggest --from-sli slis/ -f specs/ --url http://localhost:9090 -o detectors/
+```
+
+`--from-sli` says which SLIs to draft from and `-f` is the tree a drafted
+`sloRef` is resolved against, which defaults to the `--from-sli` paths. Both
+mean a tree of specifications, as they do in every command here: a directory
+holding generated rule files alongside them is refused as an unknown kind, so
+point them at the OpenSLO half of the repository rather than at its root.
 
 `backtest` reads history and prints the report. It writes nothing, needs only
 a range query endpoint, and exits 1 when a detector is over the noise budget
@@ -77,8 +98,11 @@ FENO_PROMETHEUS_URL=http://localhost:9090 go test -tags integration ./internal/b
 
 The budget overlap's integration test wants two more, `FENO_SLO_GOOD_QUERY`
 and `FENO_SLO_TOTAL_QUERY`, which are the two halves of an SLO ratio over the
-same server. `just backtest-history` passes all of them against the generated
-month.
+same server. `cmd/feno`'s integration test wants the same two and runs the
+whole loop, drafting a detector from an SLI built out of them and then
+generating and backtesting what it wrote. `just backtest-history` passes all
+of them against the generated month, to internal/backtest, internal/suggest
+and cmd/feno.
 
 ## Layout
 
@@ -94,6 +118,7 @@ What exists:
 | `internal/rules` | The Prometheus target. Compiles a band into recording and alerting rules, compiles a linked SLO's objective into the burn query the budget overlap is read from, and declares what the target cannot express |
 | `internal/episode` | Band breaches grouped into the episodes a person would have been paged for, matching how Prometheus runs `for`, and the intersection of those episodes with another timeline |
 | `internal/config` | `feno.yaml`: the repository's targets and its noise budget, resolved per detector from the files above it with the stricter limit binding. A limit is a pointer, because zero is a budget somebody means |
+| `internal/suggest` | `suggest`: one profiling read through internal/prometheus, the decisions as a pure function over that profile, and the drafted document. Deterministic and offline once the read is done, and nothing in it calls a model |
 | `internal/backtest` | Replay tying the reader, the band and the episode report together: the query range a lookback demands, the second read the budget overlap intersects with, the aggregation across one query's series, and the report a person reads |
 | `smoketest/` | Two Prometheus servers, one started with the experimental functions and one without, for the capability probe |
 | `history/` | A Prometheus over a generated month of TSDB blocks, for the backtest's read against a range past the resolution limit |
@@ -101,8 +126,8 @@ What exists:
 | `spec.md` | Design, research, and the decisions already settled |
 
 Every package the specification calls for now exists. What is missing is the
-ClickHouse target and `feno suggest --from-sli`. Do not create a package as an
-empty directory ahead of the work that fills it.
+ClickHouse target. Do not create a package as an empty directory ahead of the
+work that fills it.
 
 ## Conventions
 
@@ -151,10 +176,11 @@ Never bypass a pre-commit hook. Do not commit unless asked to.
 
 ## Status
 
-`feno version`, `feno generate` and `feno backtest` run. A detector document
-loads into a `detect.Spec`, compiles into a Prometheus rule file, and replays
-over history into a report that is held to the budget in `feno.yaml` and says
-how much of its paging coincided with the error budget of the SLO its
-`sloRef` names; what is missing is the ClickHouse target and `feno suggest`. The README `Status` and
+`feno version`, `feno suggest`, `feno generate` and `feno backtest` run. An
+SLI already in the repository drafts into a detector document, which loads
+into a `detect.Spec`, compiles into a Prometheus rule file, and replays over
+history into a report that is held to the budget in `feno.yaml` and says how
+much of its paging coincided with the error budget of the SLO its `sloRef`
+names; what is missing is the ClickHouse target. The README `Status` and
 `Build order` sections say what is next; keep them accurate when you land
 something they describe.

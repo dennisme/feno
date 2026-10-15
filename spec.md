@@ -891,9 +891,10 @@ Three further advantages:
 3. Prometheus emitter, golden tests against the Grafana reference rules, `promtool` in CI.
 4. `backtest` over `/api/v1/query_range`, with the episode report.
 5. The budget overlap: a second read of the same window against the burn signal compiled from a linked SLO (Part 12).
-6. Harden, get it operated against something real.
-7. The four clickhouse-ruler prerequisites above.
-8. ClickHouse target: refreshable MV DDL plus ruler rule, golden tests against hand-written artifacts.
+6. `suggest --from-sli`: one profiling read, the decisions as a pure function over it, and the drafted document. It comes after the backtester rather than before it, because a draft is only worth having if the thing it drafts can be replayed over history the same day.
+7. Harden, get it operated against something real.
+8. The four clickhouse-ruler prerequisites above.
+9. ClickHouse target: refreshable MV DDL plus ruler rule, golden tests against hand-written artifacts.
 
 ---
 

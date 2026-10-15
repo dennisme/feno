@@ -1,0 +1,52 @@
+# Drafted by feno v1.2.3 from SLI checkout-availability in
+#   testdata/two-slos/input.yaml. Review every field before committing it.
+#   Nothing here was written by a model.
+#
+# Series banded: ratioMetric.total
+# Profiled: 1 series over 2026-09-23T00:00:00Z to 2026-10-14T00:00:00Z at a 5m
+#   step
+#
+# class requests: read from the names in the query, which is a guess and not a
+#   measurement. Nothing in the band reads it, so correcting it costs nothing
+#   but is worth doing
+# strategy robust: the median series' standard deviation is 3 times its
+#   interquartile scale, at or above the 1.5 that says spikes are setting the
+#   width
+# seasonality daily: autocorrelation of the median series, daily at 0.78, over
+#   the 0.50 threshold; no weekly shape, 0.21 against the 0.50 threshold
+# sensitivity balanced: not profiled. How many units of scale is a policy about
+#   who gets paged, not a property of the series
+# coverage 99.5%: the median of 1 series over 6049 instants, measured at the
+#   profile's step and not at the step a ruler will evaluate at
+#
+# window, minCoverage and minWidth are absent, so feno's own defaults apply.
+#   minWidth has no default and none is drafted: it is a floor in this series'
+#   own units, which is a judgement about how large a change is worth paging for
+#   rather than something a profile can measure.
+#
+# sloRef: 2 SLOs name this SLI, checkout-availability,
+#   checkout-availability-tight. A detector is judged against one error budget
+#   and nothing says which, so the field is absent. Set it to the objective this
+#   detector protects.
+#
+apiVersion: anomaly.openslo.io/v1alpha
+kind: AnomalyDetector
+metadata:
+  name: checkout-availability
+spec:
+  description: Drafted from SLI checkout-availability, ratioMetric.total.
+  indicator:
+    metadata:
+      name: checkout-availability
+    spec:
+      thresholdMetric:
+        metricSource:
+          metricSourceRef: mimir-prod
+          spec:
+            query: sum(rate(http_requests_total{service="checkout"}[5m]))
+  detection:
+    strategy: robust
+    sensitivity: balanced
+    seasonality:
+      - daily
+    class: requests

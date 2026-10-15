@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	v1 "github.com/OpenSLO/go-sdk/pkg/openslo/v1"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/dennisme/feno/internal/detect"
@@ -45,13 +46,13 @@ type group struct {
 type rule struct {
 	Record      string            `yaml:"record,omitempty"`
 	Alert       string            `yaml:"alert,omitempty"`
-	Expr        expression        `yaml:"expr"`
+	Expr        Expression        `yaml:"expr"`
 	For         string            `yaml:"for,omitempty"`
 	Labels      map[string]string `yaml:"labels,omitempty"`
 	Annotations map[string]string `yaml:"annotations,omitempty"`
 }
 
-// expression is a PromQL expression that chooses how it is written out.
+// Expression is a PromQL expression that chooses how it is written out.
 //
 // A plain scalar is what a short expression wants, and the emitter wraps a
 // long one across lines, which puts a line break in the middle of a metric
@@ -59,12 +60,15 @@ type rule struct {
 // is unreadable in exactly the file somebody is reading under pressure. So
 // anything long or already multi-line becomes a literal block, which is
 // what the Grafana reference library writes too.
-type expression string
+// It is exported because `feno suggest` writes a query into a YAML document
+// too, and a draft whose query was folded mid-metric-name is unreadable in
+// the same way a generated rule would be.
+type Expression string
 
 // foldWidth is where the encoder would start wrapping a plain scalar.
 const foldWidth = 72
 
-func (e expression) MarshalYAML() (any, error) {
+func (e Expression) MarshalYAML() (any, error) {
 	node := &yaml.Node{Kind: yaml.ScalarNode, Value: string(e)}
 	if len(e) > foldWidth || strings.Contains(string(e), "\n") {
 		node.Style = yaml.LiteralStyle
@@ -104,13 +108,13 @@ func compile(
 		degraded *Degradation
 	)
 
-	g.Rules = append(g.Rules, rule{Record: level, Expr: expression(query)})
+	g.Rules = append(g.Rules, rule{Record: level, Expr: Expression(query)})
 
 	centre, scale, pooled := statistics(target, series, level, band)
 	g.Rules = append(g.Rules, pooled...)
 	g.Rules = append(g.Rules,
-		rule{Record: series("centre"), Expr: expression(centre)},
-		rule{Record: series("scale"), Expr: expression(scale)},
+		rule{Record: series("centre"), Expr: Expression(centre)},
+		rule{Record: series("scale"), Expr: Expression(scale)},
 	)
 
 	if band.RobustScale == detect.ScaleMAD && !target.ExperimentalFunctions {
@@ -126,9 +130,9 @@ func compile(
 		halfWidth = fmt.Sprintf("clamp_min(%s, %s)", halfWidth, number(band.MinWidth/2))
 	}
 	g.Rules = append(g.Rules,
-		rule{Record: series("half_width"), Expr: expression(halfWidth)},
-		rule{Record: series("upper_band"), Expr: expression(series("centre") + " + " + series("half_width"))},
-		rule{Record: series("lower_band"), Expr: expression(series("centre") + " - " + series("half_width"))},
+		rule{Record: series("half_width"), Expr: Expression(halfWidth)},
+		rule{Record: series("upper_band"), Expr: Expression(series("centre") + " + " + series("half_width"))},
+		rule{Record: series("lower_band"), Expr: Expression(series("centre") + " - " + series("half_width"))},
 	)
 
 	g.Rules = append(g.Rules, alert(d, level, series))
@@ -168,8 +172,8 @@ func statistics(
 		tag := promDuration(offset)
 		mean, variance := series("mean_"+tag), series("var_"+tag)
 		pooled = append(pooled,
-			rule{Record: mean, Expr: expression(fmt.Sprintf("avg_over_time(%s)", sel))},
-			rule{Record: variance, Expr: expression(fmt.Sprintf("stddev_over_time(%s) ^ 2", sel))},
+			rule{Record: mean, Expr: Expression(fmt.Sprintf("avg_over_time(%s)", sel))},
+			rule{Record: variance, Expr: Expression(fmt.Sprintf("stddev_over_time(%s) ^ 2", sel))},
 		)
 		means = append(means, mean)
 		variances = append(variances, variance)
@@ -217,7 +221,7 @@ func robustScale(target Target, band detect.Spec, sel string) string {
 func alert(d spec.Detector, level string, series func(string) string) rule {
 	r := rule{
 		Alert: AlertName,
-		Expr: expression(fmt.Sprintf("%s > %s or %s < %s",
+		Expr: Expression(fmt.Sprintf("%s > %s or %s < %s",
 			level, series("upper_band"), level, series("lower_band"))),
 		Labels: map[string]string{"anomaly_detector": d.Metadata.Name},
 	}
@@ -262,9 +266,23 @@ func Query(d spec.Detector) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detector %q: %w", d.Metadata.Name, err)
 	}
+	query, err := SourceQuery(source)
+	if err != nil {
+		return "", fmt.Errorf("detector %q: %w", d.Metadata.Name, err)
+	}
+	return query, nil
+}
+
+// SourceQuery is the query one metric source carries, whether it belongs to
+// a detector or to an SLI.
+//
+// `feno suggest` reads an SLI's metric source rather than a detector's, and
+// a second place reading a key out of OpenSLO's extension map is a second
+// place to be wrong about which key it is.
+func SourceQuery(source v1.SLIMetricSource) (string, error) {
 	query, ok := source.Spec[queryKey].(string)
 	if !ok || strings.TrimSpace(query) == "" {
-		return "", fmt.Errorf("detector %q: %w", d.Metadata.Name, ErrQuery)
+		return "", ErrQuery
 	}
 	return strings.TrimSpace(query), nil
 }

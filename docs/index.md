@@ -4,12 +4,14 @@ Anomaly detector specifications, written as OpenSLO-shaped YAML in git,
 compiled into the alert rules your stack already evaluates, and replayed over
 history before they ship.
 
-!!! warning "Status: both commands run against Prometheus"
+!!! warning "Status: three commands run against Prometheus"
 
-    `feno backtest -f detectors/ --url <endpoint> --from -30d` replays a
-    detector over history and prints the report, and `feno generate -f
-    detectors/ -o rules/anomaly/` compiles the rule files, with `--check` as
-    the drift gate. The ClickHouse target is next. See the
+    `feno suggest --from-sli slis/ --url <endpoint> -o detectors/` drafts a
+    detector from an SLI already in the repository, `feno backtest -f
+    detectors/ --url <endpoint> --from -30d` replays it over history and
+    prints the report, and `feno generate -f detectors/ -o rules/anomaly/`
+    compiles the rule files, with `--check` as the drift gate. The ClickHouse
+    target is next. See the
     [README](https://github.com/dennisme/feno#readme) for what is being built
     and in what order, and
     [spec.md](https://github.com/dennisme/feno/blob/main/spec.md) for why.
@@ -21,7 +23,16 @@ the algorithms were never the hard part. Tuning them is. A band that pages
 forty times a month gets muted in a quarter, and nothing in the open source
 tool chain tells you that will happen before you merge it.
 
-So feno is two commands over one specification.
+So feno is three commands over one specification.
+
+`suggest` writes the first draft of that specification from an SLI the
+repository already holds. It profiles the series over three weeks and decides
+the fields nobody can fill in from the document alone, seasonality from the
+autocorrelation at a day and at a week, the strategy from how spiky the series
+is, and it puts the measurement behind every one of them in the draft as a
+comment. The fields it cannot measure are left out so the defaults apply, and
+a series too sparse or too spiky to band is refused with the number that says
+so rather than drafted anyway. Nothing in it calls out to a model.
 
 `generate` compiles a detector into recording and alerting rules for the
 engine you already run, which means Prometheus and its compatible stores

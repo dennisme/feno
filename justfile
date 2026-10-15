@@ -139,7 +139,8 @@ smoketest:
     echo "smoketest: both forms compiled from what the server answered"
 
 # Prove a chunked range query lands on the grid the band is evaluated against,
-# and that the burn signal's own read lands on the same one.
+# that the burn signal's own read lands on the same one, and that a detector
+# drafted from an SLI by `suggest` generates and backtests unedited.
 #
 # Not part of `check`, because it needs Docker. What it covers is the one
 # thing no fixture can be evidence for: a /api/v1/query_range longer than the
@@ -179,11 +180,15 @@ backtest-history:
 
     $compose up -d --wait
 
+    # cmd/feno is in the list because `feno suggest` is only finished if the
+    # document it writes is one the backtest reads unedited, and nothing
+    # short of running both against a real server is evidence of that.
     FENO_PROMETHEUS_URL=http://localhost:19092 \
     FENO_PROMETHEUS_QUERY=feno_requests_per_second \
     FENO_SLO_GOOD_QUERY='sum(feno_good_per_second)' \
     FENO_SLO_TOTAL_QUERY='sum(feno_requests_per_second)' \
-        env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration ./internal/backtest/
+        env -u GOROOT GOTOOLCHAIN=auto go test -count=1 -tags integration \
+            ./internal/backtest/ ./internal/suggest/ ./cmd/feno/
 
 # Everything CI runs, in the order CI runs it.
 check: lint build test promtool markdownlint

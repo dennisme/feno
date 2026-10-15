@@ -1,0 +1,12 @@
+# An SLI measured somewhere this target cannot read. It is refused by name
+# rather than profiled against whatever --url happened to point at.
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: orders-written
+spec:
+  thresholdMetric:
+    metricSource:
+      type: ClickHouse
+      spec:
+        query: SELECT count() FROM otel.orders

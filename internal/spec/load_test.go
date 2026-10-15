@@ -32,11 +32,22 @@ func TestLoadMixedDirectory(t *testing.T) {
 	// The OpenSLO half keeps its own kinds and its own types, decoded by
 	// go-sdk. Asserting the concrete types is the check that nothing here
 	// rebuilt them.
-	if _, ok := bundle.Objects[0].(v1.SLI); !ok {
-		t.Errorf("first object is %T, want v1.SLI", bundle.Objects[0])
+	if _, ok := bundle.Objects[0].Object.(v1.SLI); !ok {
+		t.Errorf("first object is %T, want v1.SLI", bundle.Objects[0].Object)
 	}
-	if _, ok := bundle.Objects[1].(v1.DataSource); !ok {
-		t.Errorf("second object is %T, want v1.DataSource", bundle.Objects[1])
+	if _, ok := bundle.Objects[1].Object.(v1.DataSource); !ok {
+		t.Errorf("second object is %T, want v1.DataSource", bundle.Objects[1].Object)
+	}
+
+	// Each one carries the file it was read from, which is what lets
+	// `feno suggest` say which document a draft came from.
+	for _, object := range bundle.Objects {
+		if object.File == "" {
+			t.Errorf("%s %q carries no file", object.GetKind(), object.GetName())
+		}
+	}
+	if want := filepath.Join("testdata", "mixed", "checkout.yaml"); bundle.Objects[0].File != want {
+		t.Errorf("first object came from %q, want %q", bundle.Objects[0].File, want)
 	}
 
 	byName := map[string]Detector{}
