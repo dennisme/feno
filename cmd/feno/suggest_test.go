@@ -90,7 +90,7 @@ func TestSuggestFlags(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if got := suggestCommand(tc.args, &stdout, &stderr); got != tc.want {
+			if got := suggestCommand(t.Context(), tc.args, &stdout, &stderr); got != tc.want {
 				t.Errorf("exit = %d, want %d\n%s", got, tc.want, stderr.String())
 			}
 			if !strings.Contains(stderr.String(), tc.inStderr) {
@@ -114,7 +114,7 @@ func TestSuggestSkipsUnreachableDatasource(t *testing.T) {
 	srv.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := suggestCommand([]string{"--from-sli", "testdata/slis/checkout.yaml", "--url", srv.URL},
+	code := suggestCommand(t.Context(), []string{"--from-sli", "testdata/slis/checkout.yaml", "--url", srv.URL},
 		&stdout, &stderr)
 
 	if code != exitSkipped {
@@ -145,7 +145,7 @@ func TestSuggestRefusesToReplaceADraft(t *testing.T) {
 	args := []string{"--from-sli", "testdata/slis/checkout.yaml", "--url", srv.URL, "-o", dir}
 
 	var stdout, stderr bytes.Buffer
-	if code := suggestCommand(args, &stdout, &stderr); code != exitUsage {
+	if code := suggestCommand(t.Context(), args, &stdout, &stderr); code != exitUsage {
 		t.Errorf("exit = %d, want %d\n%s", code, exitUsage, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "--force") {
@@ -164,7 +164,26 @@ func TestSuggestRefusesToReplaceADraft(t *testing.T) {
 	// the flags that stopped it.
 	stdout.Reset()
 	stderr.Reset()
-	if code := suggestCommand(append(args, "--force"), &stdout, &stderr); code != exitSkipped {
+	if code := suggestCommand(t.Context(), append(args, "--force"), &stdout, &stderr); code != exitSkipped {
 		t.Errorf("with --force, exit = %d, want %d\n%s", code, exitSkipped, stderr.String())
+	}
+}
+
+// TestSuggestDeadline is the backtest's deadline on the authoring path: a
+// profile read against a server that never answers ends the run rather than
+// holding a laptop open all afternoon.
+func TestSuggestDeadline(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	got := run(t.Context(), []string{
+		"suggest", "--from-sli", "testdata/slis", "--url", hung(t),
+		"--request-timeout", "50ms",
+	}, &stdout, &stderr)
+
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not reachable") {
+		t.Errorf("stderr = %q, want it to say the server is not reachable", stderr.String())
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,7 +27,7 @@ import (
 const defaultStep = time.Minute
 
 // backtestCommand replays detectors over history and prints the report.
-func backtestCommand(args []string, stdout, stderr io.Writer) int {
+func backtestCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
 		fs         = flag.NewFlagSet("backtest", flag.ContinueOnError)
 		paths      pathList
@@ -38,6 +39,7 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 		only       = fs.String("detector", "", "report on one detector by name rather than every one loaded")
 		maxPoints  = fs.Int("max-points", 0, "the server's points-per-series limit, if it is lower than Prometheus' 11000")
 		configPath = fs.String("config", "", "the "+config.Filename+" holding the noise budget; found by walking up from the specifications when unset")
+		timeout    = fs.Duration("request-timeout", prometheus.DefaultTimeout, timeoutUsage)
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
 	fs.Var(&headers, "header", "a header to send with every request, as name=value; repeatable")
@@ -126,17 +128,27 @@ func backtestCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	client.Header = http.Header(headers)
 	client.MaxPointsPerSeries = *maxPoints
+	client.Timeout = *timeout
 
 	options := backtest.Options{From: start, To: end, Step: *step}
 
 	var (
+		total    = len(held)
 		reported int
 		failures []string
 		waived   []string
 	)
 	for _, held := range held {
-		report, err := backtest.Run(context.Background(), client, held.detector, options)
+		report, err := backtest.Run(ctx, client, held.detector, options)
 		if err != nil {
+			// An interrupted run keeps the reports it already printed and
+			// says how far it got. The budget is not held: some detectors
+			// were measured and the rest were not.
+			if errors.Is(err, context.Canceled) {
+				printf(stderr, "backtest interrupted after %d of %d detectors: the reports above are the ones that ran\n",
+					reported, total)
+				return exitSkipped
+			}
 			// The gate degrades here rather than failing: a runner that
 			// cannot reach a datasource has not found a noisy detector, it
 			// has found out it cannot look.

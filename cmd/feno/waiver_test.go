@@ -153,7 +153,7 @@ func TestWaiverDoesNotClearTheDriftGate(t *testing.T) {
 
 	rules := filepath.Join(root, "rules")
 	var stdout, stderr bytes.Buffer
-	if got := run([]string{"generate", "-f", specs, "-o", rules}, &stdout, &stderr); got != exitOK {
+	if got := run(t.Context(), []string{"generate", "-f", specs, "-o", rules}, &stdout, &stderr); got != exitOK {
 		t.Fatalf("generate exit = %d, want %d\nstderr: %s", got, exitOK, stderr.String())
 	}
 
@@ -172,7 +172,7 @@ func TestWaiverDoesNotClearTheDriftGate(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if got := run([]string{"generate", "-f", specs, "-o", rules, "--check"}, &stdout, &stderr); got != exitFinding {
+	if got := run(t.Context(), []string{"generate", "-f", specs, "-o", rules, "--check"}, &stdout, &stderr); got != exitFinding {
 		t.Fatalf("generate --check exit = %d, want %d: a waiver cleared the drift gate\nstderr: %s",
 			got, exitFinding, stderr.String())
 	}

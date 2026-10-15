@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -135,7 +136,7 @@ func TestBacktestFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			got := run(append([]string{"backtest"}, tt.args...), &stdout, &stderr)
+			got := run(t.Context(), append([]string{"backtest"}, tt.args...), &stdout, &stderr)
 			if got != tt.want {
 				t.Errorf("exit code = %d, want %d\nstderr: %s", got, tt.want, stderr.String())
 			}
@@ -243,7 +244,7 @@ func TestBacktestSkipsUnreachableDatasource(t *testing.T) {
 	// -f names the tree rather than the leaf, which is how a budget above
 	// the specifications is asked for: the walk stops where -f points.
 	var stdout, stderr bytes.Buffer
-	got := run([]string{"backtest", "-f", root, "--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
+	got := run(t.Context(), []string{"backtest", "-f", root, "--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
 
 	if got != exitSkipped {
 		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
@@ -272,7 +273,7 @@ func TestBacktestWithoutBudgetSaysSo(t *testing.T) {
 	srv.Close()
 
 	var stdout, stderr bytes.Buffer
-	got := run([]string{"backtest", "-f", "testdata/detectors/checkout.yaml",
+	got := run(t.Context(), []string{"backtest", "-f", "testdata/detectors/checkout.yaml",
 		"--url", srv.URL, "--from", "-30d"}, &stdout, &stderr)
 
 	if got != exitSkipped {
@@ -395,5 +396,101 @@ func TestBudgetPerDetector(t *testing.T) {
 				t.Errorf("thresholds = %+v, want both limits to name a file", got)
 			}
 		})
+	}
+}
+
+// hung is an httptest server that accepts a request and never answers it,
+// which is the failure a deadline exists for: a refused connection fails in
+// microseconds, and a run against a server that just holds the socket prints
+// nothing at all until something gives up.
+func hung(t *testing.T) string {
+	t.Helper()
+
+	// Released at cleanup as well as on the request's own context, because a
+	// handler still parked when the test ends holds the server's Close.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	return srv.URL
+}
+
+// TestBacktestDeadline proves the gate ends rather than hanging, and that it
+// ends in the code that says nobody checked. A CI job killed by the runner's
+// own timeout prints neither.
+func TestBacktestDeadline(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	got := run(t.Context(), []string{
+		"backtest", "-f", "testdata/detectors", "--url", hung(t),
+		"--from", "-1d", "--request-timeout", "50ms",
+	}, &stdout, &stderr)
+
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	for _, want := range []string{"skipped", "not reachable"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+		}
+	}
+}
+
+// TestBacktestInterrupted covers Ctrl-C partway through a run: the reports
+// already computed are the ones already printed, and the run exits in the
+// code for a budget nobody finished checking rather than in a clean zero.
+func TestBacktestInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	answer, err := os.ReadFile("testdata/matrix_empty.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The first detector is answered and the second is interrupted, which is
+	// the only arrangement where "what it already computed" is not empty.
+	release := make(chan struct{})
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 1 {
+			cancel()
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(answer); err != nil {
+			t.Errorf("writing response: %v", err)
+		}
+	}))
+	defer func() {
+		close(release)
+		srv.Close()
+	}()
+
+	var stdout, stderr bytes.Buffer
+	got := run(ctx, []string{
+		"backtest", "-f", "testdata/detectors", "--url", srv.URL, "--from", "-1d",
+	}, &stdout, &stderr)
+
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "interrupted") {
+		t.Errorf("stderr = %q, want it to say the run was interrupted", stderr.String())
+	}
+	if stdout.Len() == 0 {
+		t.Error("stdout is empty, want the report computed before the interrupt")
 	}
 }

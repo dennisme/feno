@@ -47,7 +47,7 @@ const (
 )
 
 // suggestCommand drafts a detector per SLI and writes it out for review.
-func suggestCommand(args []string, stdout, stderr io.Writer) int {
+func suggestCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
 		fs        = flag.NewFlagSet("suggest", flag.ContinueOnError)
 		selected  pathList
@@ -59,6 +59,7 @@ func suggestCommand(args []string, stdout, stderr io.Writer) int {
 		out       = fs.String("o", "", "directory to write one draft per SLI into; the drafts go to stdout when unset")
 		force     = fs.Bool("force", false, "replace a draft that is already in the output directory")
 		maxPoints = fs.Int("max-points", 0, "the server's points-per-series limit, if it is lower than Prometheus' 11000")
+		timeout   = fs.Duration("request-timeout", prometheus.DefaultTimeout, timeoutUsage)
 	)
 	fs.Var(&selected, "from-sli", "a file or directory of SLIs to draft from; repeatable")
 	fs.Var(&tree, "f", "a tree of OpenSLO documents a drafted sloRef is resolved against; the --from-sli paths when unset; repeatable")
@@ -110,6 +111,7 @@ func suggestCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	client.Header = http.Header(headers)
 	client.MaxPointsPerSeries = *maxPoints
+	client.Timeout = *timeout
 
 	end := time.Now().UTC().Truncate(*step)
 	start := end.Add(-profileWindow)
@@ -117,8 +119,13 @@ func suggestCommand(args []string, stdout, stderr io.Writer) int {
 
 	var drafted int
 	for _, source := range sources {
-		profile, err := suggest.Measure(context.Background(), client, source.Query, start, end, *step)
+		profile, err := suggest.Measure(ctx, client, source.Query, start, end, *step)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				printf(stderr, "suggest interrupted after %d of %d SLIs: the drafts above are the ones that ran\n",
+					drafted, len(sources))
+				return exitSkipped
+			}
 			// The same degradation the backtest has, for the same reason: a
 			// run that could not reach the datasource has not found out
 			// that nothing is worth drafting.
