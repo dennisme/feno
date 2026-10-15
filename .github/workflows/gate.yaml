@@ -20,6 +20,13 @@ permissions:
 jobs:
   # What a team copies. Two offline checks that always block, then the
   # budget, which degrades to exit 3 when the datasource is out of reach.
+  #
+  # A pull request here gets the two offline checks and nothing else, which is
+  # what spec.md's "What runs where" table says runs on every one of them. The
+  # reads go to the merge and to the cron instead: the degrade already keeps a
+  # pull request green through an outage, so what reading somebody else's
+  # server on every push of a branch buys is a warning that is never about the
+  # branch.
   gate:
     runs-on: ubuntu-latest
 
@@ -52,6 +59,7 @@ jobs:
       # datasource is its own, rather than somebody else's demo, is the one
       # that should consider failing on 3 instead.
       - name: Noise budget
+        if: github.event_name != 'pull_request'
         run: |
           set +e
           ./feno backtest -f examples/demo --url https://demo.promlabs.com --from -14d
@@ -66,8 +74,15 @@ jobs:
   # Every exit code the gate produces, asserted against the same real server
   # rather than described in a document. A code that changed meaning without
   # this failing would be a workflow somewhere reading the wrong answer.
+  #
+  # Four of the six assertions read fourteen days of history, so the recipe
+  # fails when the server is out of reach rather than passing on the two that
+  # do not. That is the opposite of the degrade in `gate` above, and on
+  # purpose: `gate` is a team's merge waiting on a datasource, and this is a
+  # table of claims that either got answered or did not.
   exit-codes:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
 
     steps:
       - name: Checkout code

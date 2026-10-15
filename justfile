@@ -202,9 +202,11 @@ backtest-history:
 # Every exit code the gate produces is asserted here rather than described,
 # because the exit code is the whole interface a workflow has to feno.
 #
-# A server somebody else runs can be down, which is what exit 3 is for: the
-# first run reports it and this recipe stops rather than failing, because an
-# outage over there is not a finding over here.
+# A server somebody else runs can be down, and then the table cannot be
+# asserted: exit 3 from the first read means four of the six assertions below
+# have no answer either way. The recipe says how many of them it ran and fails,
+# because a run that proved one sixth of the table and a run that proved all of
+# it must not both be green.
 demo url="https://demo.promlabs.com":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -224,10 +226,22 @@ demo url="https://demo.promlabs.com":
         echo "$status"
     }
 
+    # Two of the assertions below depend on what the demo server's traffic did
+    # over the last fourteen days rather than on anything in this repository,
+    # so each carries a line naming that, printed only when it is the one that
+    # failed. A mismatch there is the example tree wanting a retune, not an
+    # exit code that changed meaning.
+    assertions=6
+    ran=0
+
     expect() {
-        local want=$1 got=$2 what=$3
+        local want=$1 got=$2 what=$3 why=${4:-}
+        ran=$((ran + 1))
         if [ "$got" != "$want" ]; then
             echo "$what: exit $got, want $want"
+            if [ -n "$why" ]; then
+                echo "$why"
+            fi
             cat "$work/out" "$work/err"
             exit 1
         fi
@@ -238,20 +252,28 @@ demo url="https://demo.promlabs.com":
         grep -q -- "$1" "$work/err" || { echo "stderr does not mention $1"; cat "$work/err"; exit 1; }
     }
 
-    # The offline gates first. They need no server, so a datasource that is
-    # down never stops them running.
+    # The gates that need no server first, so a datasource that is down never
+    # stops them running. A port nothing is listening on is one of them: what
+    # it asserts is feno's own answer to a refused connection, and that answer
+    # does not depend on any server being up.
     expect 0 "$(code generate -f examples/demo --check)" "drift gate"
+
+    expect 3 "$(code backtest -f examples/demo --url http://127.0.0.1:1 --from -1d)" "unreachable"
+    said "not reachable"
 
     status=$(code backtest -f examples/demo --url "{{url}}" --from -14d)
     if [ "$status" = 3 ]; then
         said "not reachable"
-        echo "demo: {{url}} is not answering; the gate degraded rather than failing"
-        exit 0
+        echo "demo: {{url}} is not answering, so $ran of $assertions assertions ran"
+        echo "demo: the four that read history have no answer either way"
+        exit 1
     fi
-    expect 0 "$status" "within budget"
+    expect 0 "$status" "within budget" \
+        "the balanced pair paged at least once in 14d on {{url}}: that is the server's traffic, not feno's exit codes"
     cat "$work/out"
 
-    expect 1 "$(code backtest -f examples/over-budget --url "{{url}}" --from -14d)" "over budget"
+    expect 1 "$(code backtest -f examples/over-budget --url "{{url}}" --from -14d)" "over budget" \
+        "the aggressive detector paged 0 times in 14d on {{url}}: that is the server's traffic, not feno's exit codes"
     said "paging episodes, limit 0"
 
     # A waiver on either side of its expiry, written here rather than
@@ -274,11 +296,7 @@ demo url="https://demo.promlabs.com":
         expect "$want" "$(code backtest -f examples/over-budget -config "$waiver/$name.yaml" --url "{{url}}" --from -14d)" "$name waiver"
     done
 
-    # The fourth code, against a port nothing is listening on.
-    expect 3 "$(code backtest -f examples/demo --url http://127.0.0.1:1 --from -1d)" "unreachable"
-    said "not reachable"
-
-    echo "demo: every exit code the gate produces, against {{url}}"
+    echo "demo: $ran of $assertions assertions, every exit code the gate produces, against {{url}}"
 
 # Everything CI runs, in the order CI runs it.
 check: lint build test promtool markdownlint

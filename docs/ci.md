@@ -36,8 +36,16 @@ correctness: a rule that fails either cannot do its job.
 
 ## The workflow
 
-This is [`.github/workflows/gate.yaml`](https://github.com/dennisme/feno/blob/main/.github/workflows/gate.yaml),
-which this repository runs against a public Prometheus it does not operate.
+The shape below is what this repository runs against a public Prometheus it
+does not operate.
+[`.github/workflows/gate.yaml`](https://github.com/dennisme/feno/blob/main/.github/workflows/gate.yaml)
+is the file, and it differs in two ways that follow from the datasource being
+somebody else's. It adds a daily schedule, because nothing here changes when
+the demo server does and a server that started answering differently is still
+worth catching. And it keeps the read off `pull_request`, leaving a pull
+request the two offline checks, because a merge waiting on another team's
+uptime is the thing exit 3 exists to avoid. A repository reading a datasource
+it operates wants the read on every pull request, which is the version below.
 
 ```yaml
 name: Gate
@@ -151,7 +159,14 @@ above runs.
 ## Proving the codes rather than trusting this page
 
 `just demo` runs the whole table against the public demo server: the drift
-gate, a tree within budget, a tree over it, a waiver on either side of its
-expiry, and a port nothing is listening on. It is a job in the same workflow,
+gate, a port nothing is listening on, a tree within budget, a tree over it,
+and a waiver on either side of its expiry. It is a job in the same workflow,
 so a code that changed meaning fails here rather than in somebody's
 repository.
+
+It counts what it ran and says so on its last line, because four of the six
+assertions read fourteen days of history and a demo server that is out of
+reach leaves those four with no answer either way. So this one recipe fails on
+an unreachable server rather than degrading like the gate above: the gate is a
+team's merge, and this is a table of claims. A run that proved two of six and
+a run that proved all six must not both be green.
