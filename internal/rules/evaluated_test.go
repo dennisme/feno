@@ -109,11 +109,18 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 				//   rule: anomaly:parity:scale, err: parse error:
 				//   function "mad_over_time" is not enabled
 				//
-				// What covers it instead is a server started with the
-				// feature on, which needs seeded history as well as the
-				// flag. Until that exists, the median absolute deviation's
-				// arithmetic is unverified against anything but itself.
-				t.Skip("promtool unit tests cannot evaluate mad_over_time; needs a flagged server with history")
+				// The flag reaches the rule manager and loads the file. The
+				// engine the unit test evaluates with builds its own parser
+				// and takes the default options, so the expression is
+				// rejected the second time it is parsed.
+				//
+				// https://github.com/prometheus/prometheus/pull/20046 passes
+				// the configured parser through. Once that is released and
+				// .tool-versions moves to it, delete this branch: the case
+				// is already in the table above and needs nothing else to
+				// run. Until then the median absolute deviation's arithmetic
+				// is unverified against anything but itself.
+				t.Skip("promtool unit tests cannot evaluate mad_over_time: prometheus/prometheus#20046")
 			}
 
 			detection := tt.band
