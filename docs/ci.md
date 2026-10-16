@@ -10,16 +10,25 @@ in the exit code, so that is where this page starts.
 | 0 | Every detector is within its noise budget. A waived finding is still printed, and still exits 0 | Merge |
 | 1 | A detector is over its budget, or a waiver has expired, or nothing was worth drafting | Fail the build |
 | 2 | feno could not run: a flag, a path, a malformed `feno.yaml`, a query the server rejected | Fail the build. This one is never the detector's fault |
-| 3 | The datasource was never reached, so the budget went unchecked | Decide. See below |
+| 3 | The datasource was never reached, so whatever needed it did not run | Decide. See below |
 
 Exit 3 is the one that needs a decision. A runner with no network path to
 production has not found a quiet detector and has not found a noisy one, and
-reusing either of the other codes would say something untrue. The two offline
-checks still ran, so what is unchecked is the noise budget alone.
+reusing either of the other codes would say something untrue.
+
+Every command that reads a server exits 3 when it cannot reach one, so a
+workflow has one rule rather than one per command. A server that answered,
+and answered badly, is a different finding and keeps exit 2.
 
 A repository reading its own datasource should probably fail on 3: a
 datasource it operates being unreachable is its problem. A repository reading
 somebody else's should warn, which is what the example below does.
+
+A workflow that warns on 3 should give `feno generate --check` no `--url`.
+With one, the drift gate reads the server to learn which form of the robust
+band it can evaluate, and a run that never got an answer cannot tell drift
+from agreement, so it exits 3 along with everything else. Without one the
+check is offline, always blocks, and is the correctness gate described below.
 
 ## What is offline and what is not
 
@@ -29,6 +38,7 @@ somebody else's should warn, which is what the example below does.
 | `promtool check rules` | No |
 | `feno backtest` | Yes, read access |
 | `feno generate --url` | Yes, one instant query |
+| `feno suggest` | Yes, read access |
 
 The two offline checks work on a fork pull request and on a runner with no
 path to production, and nothing in `feno.yaml` waives them. They are
