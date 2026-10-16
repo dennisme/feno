@@ -42,14 +42,8 @@ func generateCommand(ctx context.Context, args []string, stdout, stderr io.Write
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
 	fs.Var(&headers, "header", "a header to send with the probe, as name=value; repeatable")
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		printf(stderr, "usage: feno generate -f <path> [-o <directory>] [--check]\n\n")
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "usage: feno generate -f <path> [-o <directory>] [--check]", stdout, stderr); !ok {
+		return code
 	}
 	if len(paths) == 0 {
 		fs.Usage()
@@ -93,6 +87,16 @@ func generateCommand(ctx context.Context, args []string, stdout, stderr io.Write
 	if *url != "" {
 		probed, err := probe(ctx, *url, *timeout, http.Header(headers), stderr)
 		if err != nil {
+			// A server nobody reached is the same finding here as it is for
+			// backtest: the probe decides which form of the robust band
+			// compiles, so without an answer generate cannot tell drift from
+			// agreement, and calling that a bad flag or a bad path would name
+			// the wrong cause. A server that answered badly is a different
+			// finding and keeps exitUsage.
+			if prometheus.Unreachable(err) {
+				printf(stderr, "generate skipped: %s is not reachable: %s\n", *url, err)
+				return exitSkipped
+			}
 			printf(stderr, "%s\n", err)
 			return exitUsage
 		}

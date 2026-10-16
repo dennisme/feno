@@ -64,14 +64,8 @@ func suggestCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 	fs.Var(&selected, "from-sli", "a file or directory of SLIs to draft from; repeatable")
 	fs.Var(&tree, "f", "a tree of OpenSLO documents a drafted sloRef is resolved against; the --from-sli paths when unset; repeatable")
 	fs.Var(&headers, "header", "a header to send with every request, as name=value; repeatable")
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		printf(stderr, "usage: feno suggest --from-sli <path> --url <endpoint> [-o <directory>]\n\n")
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "usage: feno suggest --from-sli <path> --url <endpoint> [-o <directory>]", stdout, stderr); !ok {
+		return code
 	}
 	if len(selected) == 0 || *url == "" {
 		fs.Usage()
