@@ -218,6 +218,41 @@ ClickHouse target.
 [spec.md](spec.md) is the source of truth for intended behaviour and carries
 the research behind it. Read it before proposing a design change.
 
+## Install
+
+feno is one static binary that reads specifications, talks to a datasource
+over HTTP and writes rule files. There is nothing to run as a service and no
+state to keep.
+
+Release archives for Linux and macOS on `x86_64` and `arm64`, with a
+`checksums.txt` covering all of them, are on the
+[releases page](https://github.com/dennisme/feno/releases).
+
+```bash
+version=0.1.0
+os=$(uname -s)
+arch=$(uname -m)
+base=https://github.com/dennisme/feno/releases/download/v$version
+
+curl -sSLO "$base/feno_${version}_${os}_${arch}.tar.gz"
+curl -sSLO "$base/checksums.txt"
+shasum -a 256 -c checksums.txt --ignore-missing
+
+tar -xzf "feno_${version}_${os}_${arch}.tar.gz" feno
+install -m 0755 feno /usr/local/bin/feno
+```
+
+`go install` builds it with your own toolchain instead, which means
+`feno version` reports `dev` rather than a release:
+
+```bash
+go install github.com/dennisme/feno/cmd/feno@latest
+```
+
+[Installing feno](https://dennisme.github.io/feno/install/) is the longer
+version: pinning a release, what a workflow should do, and what each line of
+`feno version` means.
+
 ## The problem
 
 Anomaly detection on metrics is standard practice and barely adopted, and the

@@ -69,16 +69,19 @@ contributor wants. `just check` is everything CI runs.
 ```console
 $ feno version
 feno 0.1.0
-commit 9f1c0f1c4a7f0f4a0a1e0c2d3b4a5968778695a4
-built  2026-10-16T14:46:55Z
+commit 9116755b1992a04040cc08c6b2cc43af87addc9d
+built  2026-10-16T16:44:13Z
 dirty  false
 go     go1.26.9
 ```
 
 `version` is the one command that reads no datasource and no specification.
-A release archive reports the release it came from; a binary built from a
-working tree reports `dev`, and says `dirty true` when that tree had
-uncommitted changes.
+
+That is the v0.1.0 archive. A binary built from a working tree prints `dev`
+in place of the release, and `dirty true` says that tree had uncommitted
+changes in it. The commit, the build time and the dirty flag come from the
+toolchain's own record rather than from anything stamped at release time, so
+they are there either way.
 
 ## What to read next
 
