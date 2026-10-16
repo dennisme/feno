@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -33,6 +36,19 @@ const (
 // command that reads a server carries.
 const timeoutUsage = "how long one request waits for an answer; 0 waits forever"
 
+// usage is what `feno` and `feno --help` print. The three commands are named
+// with what each is for, because somebody who typed the bare command knows
+// the tool exists and not yet what it does, and the flags are a command away.
+const usage = `usage: feno <command> [flags]
+
+  suggest   draft a detector from an SLI somebody already wrote
+  generate  compile detectors into alert rules
+  backtest  replay detectors over history against a noise budget
+  version   the build this binary came from
+
+feno <command> --help for the flags a command takes.
+`
+
 // printf writes diagnostic output. A write to stdout or stderr that fails
 // leaves nowhere to report the failure, so the error is dropped rather than
 // checked at every call site.
@@ -49,15 +65,55 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// parseFlags parses a command's flags and decides where the flag package's
+// own output belongs. Help somebody asked for is output: it goes to stdout
+// and the run succeeds, so `feno backtest --help | less` shows something. A
+// usage error nobody asked for goes to stderr with a non-zero code.
+//
+// The flag package writes both of those the same way, through the flag set's
+// output, so what it wrote is held in a buffer until Parse says which it was.
+// The returned code is meaningful only when ok is false.
+func parseFlags(fs *flag.FlagSet, args []string, line string, stdout, stderr io.Writer) (int, bool) {
+	var held bytes.Buffer
+	writeTo := func(w io.Writer) {
+		fs.SetOutput(w)
+		fs.Usage = func() {
+			printf(w, "%s\n\n", line)
+			fs.PrintDefaults()
+		}
+	}
+	writeTo(&held)
+
+	err := fs.Parse(args)
+
+	// Every later fs.Usage() is the command rejecting its own arguments, so
+	// from here the flag set writes to stderr like any other diagnostic.
+	writeTo(stderr)
+
+	switch {
+	case err == nil:
+		return exitOK, true
+	case errors.Is(err, flag.ErrHelp):
+		_, _ = held.WriteTo(stdout)
+		return exitOK, false
+	default:
+		_, _ = held.WriteTo(stderr)
+		return exitUsage, false
+	}
+}
+
 // run holds the dispatch so a test can drive the whole binary without a
 // process.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printf(stderr, "%s\n", "usage: feno <suggest|generate|backtest|version>")
+		printf(stderr, "%s", usage)
 		return exitUsage
 	}
 
 	switch args[0] {
+	case "help", "-h", "--help":
+		printf(stdout, "%s", usage)
+		return exitOK
 	case "generate":
 		return generateCommand(ctx, args[1:], stdout, stderr)
 	case "backtest":

@@ -42,14 +42,8 @@ func generateCommand(ctx context.Context, args []string, stdout, stderr io.Write
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
 	fs.Var(&headers, "header", "a header to send with the probe, as name=value; repeatable")
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		printf(stderr, "usage: feno generate -f <path> [-o <directory>] [--check]\n\n")
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "usage: feno generate -f <path> [-o <directory>] [--check]", stdout, stderr); !ok {
+		return code
 	}
 	if len(paths) == 0 {
 		fs.Usage()

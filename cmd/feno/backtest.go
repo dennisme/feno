@@ -43,14 +43,8 @@ func backtestCommand(ctx context.Context, args []string, stdout, stderr io.Write
 	)
 	fs.Var(&paths, "f", "a file or directory of specifications; repeatable")
 	fs.Var(&headers, "header", "a header to send with every request, as name=value; repeatable")
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		printf(stderr, "usage: feno backtest -f <path> --url <endpoint> --from -30d\n\n")
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		return exitUsage
+	if code, ok := parseFlags(fs, args, "usage: feno backtest -f <path> --url <endpoint> --from -30d", stdout, stderr); !ok {
+		return code
 	}
 	if len(paths) == 0 || *url == "" || *from == "" {
 		fs.Usage()
