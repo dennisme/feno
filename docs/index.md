@@ -11,7 +11,8 @@ history before they ship.
     detectors/ --url <endpoint> --from -30d` replays it over history and
     prints the report, and `feno generate -f detectors/ -o rules/anomaly/`
     compiles the rule files, with `--check` as the drift gate. The ClickHouse
-    target is next. See the
+    target is next. Every field those three read is in
+    [Writing a detector](detectors.md) and [feno.yaml](feno-yaml.md). See the
     [README](https://github.com/dennisme/feno#readme) for what is being built
     and in what order, and
     [spec.md](https://github.com/dennisme/feno/blob/main/spec.md) for why.
@@ -59,11 +60,21 @@ waived, and the build passes. After it the waiver is itself a finding and the
 build fails, so the decision comes back to a reviewer instead of living on as
 a raised number nobody remembers writing.
 
+## Where to look things up
+
+| Page | What it answers |
+| --- | --- |
+| [Writing a detector](detectors.md) | Every field of a detector document: what `strategy`, `sensitivity`, `window`, `minCoverage` and the rest mean, their defaults, and what leaving one out does |
+| [feno.yaml](feno-yaml.md) | Targets, the noise budget, and waivers: how the file is found and which limit binds when two files set one |
+| [Reading a backtest report](report.md) | The report line by line: episodes against flaps, the two windows, instants with no verdict, and the budget overlap |
+| [Running the gate in CI](ci.md) | Exit codes, which checks need a server, and the workflow |
+
 ## Why it is shaped this way
 
-The specification is OpenSLO's, extended rather than replaced. A team that
-already declared a `DataSource` and an `SLI` has already written down where
-the metrics live and which query matters, so feno asks for neither again.
+The specification is [OpenSLO](https://openslo.com/)'s, extended rather than
+replaced. A team that already declared a `DataSource` and an `SLI` has
+already written down where the metrics live and which query matters, so feno
+asks for neither again.
 
 The long version, including the landscape it is answering and the decisions
 already settled, is in

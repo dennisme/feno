@@ -44,6 +44,9 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Writing a detector: detectors.md
+  - feno.yaml: feno-yaml.md
+  - Reading a backtest report: report.md
   - Running the gate in CI: ci.md
 
 # Fail the build on a link to a page that does not exist.
