@@ -64,6 +64,7 @@ a raised number nobody remembers writing.
 
 | Page | What it answers |
 | --- | --- |
+| [Installing feno](install.md) | A release archive with its checksum, `go install`, and what `feno version` reports |
 | [Writing a detector](detectors.md) | Every field of a detector document: what `strategy`, `sensitivity`, `window`, `minCoverage` and the rest mean, their defaults, and what leaving one out does |
 | [feno.yaml](feno-yaml.md) | Targets, the noise budget, and waivers: how the file is found and which limit binds when two files set one |
 | [Reading a backtest report](report.md) | The report line by line: episodes against flaps, the two windows, instants with no verdict, and the budget overlap |
