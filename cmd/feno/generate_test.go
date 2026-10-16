@@ -418,8 +418,9 @@ func TestGenerateNoOutputAnywhere(t *testing.T) {
 }
 
 // TestGenerateDeadline covers the probe, which is the one read generate
-// makes. It exits as any other unusable --url does, and the point here is
-// that it exits at all.
+// makes. A server that accepts and never answers is the same finding as one
+// that refuses the connection, so it takes the same degraded path, and the
+// point here is that it exits at all.
 func TestGenerateDeadline(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -428,10 +429,39 @@ func TestGenerateDeadline(t *testing.T) {
 		"--url", hung(t), "--request-timeout", "50ms",
 	}, &stdout, &stderr)
 
-	if got != exitUsage {
-		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitUsage, stderr.String())
+	if got != exitSkipped {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "probing") {
 		t.Errorf("stderr = %q, want it to name the probe that could not finish", stderr.String())
+	}
+}
+
+// A server that cannot be reached is the same finding for generate as it is
+// for backtest and suggest: nobody looked. The probe decides which form of
+// the robust band compiles, so without it generate cannot tell drift from
+// agreement, and saying "a flag or a path was wrong" would name the wrong
+// cause. Nothing is written either way.
+//
+// A server that answers badly is a different finding and keeps its own code,
+// which is what TestGenerateProbeFailureWritesNothing covers.
+func TestGenerateUnreachableSkips(t *testing.T) {
+	out := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"generate", "-f", "testdata/detectors", "-o", out, "--url", "http://127.0.0.1:1"}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitSkipped {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", got, exitSkipped, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not reachable") {
+		t.Errorf("stderr = %q, want it to say the server is not reachable", stderr.String())
+	}
+
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatalf("reading %s: %v", out, err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("an unreachable probe wrote %d files, want none", len(entries))
 	}
 }

@@ -87,6 +87,16 @@ func generateCommand(ctx context.Context, args []string, stdout, stderr io.Write
 	if *url != "" {
 		probed, err := probe(ctx, *url, *timeout, http.Header(headers), stderr)
 		if err != nil {
+			// A server nobody reached is the same finding here as it is for
+			// backtest: the probe decides which form of the robust band
+			// compiles, so without an answer generate cannot tell drift from
+			// agreement, and calling that a bad flag or a bad path would name
+			// the wrong cause. A server that answered badly is a different
+			// finding and keeps exitUsage.
+			if prometheus.Unreachable(err) {
+				printf(stderr, "generate skipped: %s is not reachable: %s\n", *url, err)
+				return exitSkipped
+			}
 			printf(stderr, "%s\n", err)
 			return exitUsage
 		}
