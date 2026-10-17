@@ -319,13 +319,15 @@ type line struct {
 	generated string
 }
 
-// difference reports the first line the two files disagree on.
+// difference reports the first line the two files disagree on, ignoring the
+// version each was written by.
 //
 // The first line is enough to act on and keeps the gate's output short: the
 // fix is always the same command, and the full diff is a `git diff` away once
 // it has run. A changed hash under an unchanged body says a specification
 // moved on, and a changed body under an unchanged hash says somebody edited
-// the generated file.
+// the generated file. Two files that agree on all of that and name different
+// versions are the same rules, which is [rules.IsVersionLine].
 func difference(committed, generated []byte) (line, bool) {
 	if string(committed) == string(generated) {
 		return line{}, false
@@ -342,6 +344,9 @@ func difference(committed, generated []byte) (line, bool) {
 			l.generated = is[i]
 		}
 		if l.committed != l.generated {
+			if rules.IsVersionLine(l.committed) && rules.IsVersionLine(l.generated) {
+				continue
+			}
 			return l, true
 		}
 	}
