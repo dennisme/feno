@@ -3,9 +3,11 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,6 +51,15 @@ const paritySeries = "band_input"
 // equal-length windows, which is a claim about statistics rather than about
 // code, and it is the one place here where a disagreement would be a
 // different formula rather than a typo.
+//
+// # Where that condition fails
+//
+// Equal-length is a condition on the data, not a property of the band. The
+// last two cases hold a gap in one offset window and only one, so each
+// names its own cause: one window thinner than the others, and one window
+// holding nothing. The two bands disagree in both, so both are skipped and
+// point at dennisme/feno#28, which carries the measured numbers. Asserting
+// the disagreement would make a test of whichever side is wrong.
 func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 	promtool, err := exec.LookPath("promtool")
 	if err != nil {
@@ -73,6 +84,18 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 		step   time.Duration
 		window time.Duration
 		span   time.Duration
+
+		// gaps are series instants that hold no sample, which is what a
+		// scrape gap, a rolling restart or a series that started existing
+		// two days ago all leave behind. They are written as instants rather
+		// than sample indices so that a case can say which offset window
+		// they land in.
+		gaps []time.Duration
+
+		// finding is a disagreement that has been measured and reported.
+		// The case is skipped rather than asserted, because an assertion on
+		// the current numbers would lock in whichever side is wrong.
+		finding string
 	}{
 		{
 			name: "adaptive",
@@ -146,10 +169,81 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			window: time.Hour,
 			span:   time.Hour,
 		},
+		{
+			// One offset window three samples short of the six each of the
+			// others holds, with the gap in the window taken 48h back and
+			// nowhere else.
+			//
+			// internal/detect pools all fifteen samples and takes one mean
+			// over them, so the thin window carries three fifteenths of the
+			// centre. The compiled rule averages the three per-offset means
+			// with equal weight, so it carries a third. Those are the same
+			// number only for equal-length windows, which is the condition
+			// the parity cases above all satisfy.
+			//
+			// At the instant asserted the centre is 157.8 pooled against
+			// 158 equally weighted, and the scale 128.80848833313226
+			// against 117.58684733704985. The scale is the further out of
+			// the two, because the pooled variance identity rests on the
+			// same equal-length condition as the mean.
+			name: "adaptive pooled over three days with a thin window",
+			band: spec.Detection{
+				Strategy:    detect.Adaptive,
+				Sensitivity: detect.Balanced,
+				Class:       spec.ClassRequests,
+				Seasonality: []spec.Seasonality{spec.Daily},
+			},
+			step:   10 * time.Minute,
+			window: time.Hour,
+			gaps: []time.Duration{
+				24*time.Hour + 10*time.Minute,
+				24*time.Hour + 20*time.Minute,
+				24*time.Hour + 30*time.Minute,
+			},
+			finding: "a thin offset window weights the two bands differently: dennisme/feno#28",
+		},
+		{
+			// The same window holding nothing at all, which fails
+			// differently: avg_over_time over an empty range returns no
+			// sample, so the centre and the scale expressions drop the
+			// series and the rule has no band, while internal/detect still
+			// has twelve samples from the other two windows and reports one.
+			// At the instant asserted that band has a centre of 157.5 and a
+			// scale of 144.01012695872006, and the rule has nothing at all.
+			//
+			// The coverage floor is loosened because the default would stop
+			// internal/detect too. Twelve of eighteen samples is two thirds,
+			// under DefaultMinCoverage, so at the default both sides agree
+			// by refusing. An author who writes `minCoverage: 0.5` is asking
+			// for a band from two thirds of a pool and gets one from Go and
+			// none from the server.
+			name: "adaptive pooled over three days with an empty window",
+			band: spec.Detection{
+				Strategy:    detect.Adaptive,
+				Sensitivity: detect.Balanced,
+				Class:       spec.ClassRequests,
+				Seasonality: []spec.Seasonality{spec.Daily},
+				MinCoverage: 0.5,
+			},
+			step:   10 * time.Minute,
+			window: time.Hour,
+			gaps: []time.Duration{
+				24*time.Hour + 10*time.Minute,
+				24*time.Hour + 20*time.Minute,
+				24*time.Hour + 30*time.Minute,
+				24*time.Hour + 40*time.Minute,
+				24*time.Hour + 50*time.Minute,
+				25 * time.Hour,
+			},
+			finding: "an empty offset window leaves the rule with no band and internal/detect with one: dennisme/feno#28",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.finding != "" {
+				t.Skip(tt.finding)
+			}
 			if tt.mad {
 				// promtool 3.15.0 does not enable experimental functions in
 				// its unit tests, in either flag position, so the one band
@@ -193,7 +287,7 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			// internal/detect sees and the promtool notation for the same
 			// numbers. Two hand-written copies of three weeks of samples
 			// would be two things to keep in step.
-			values, notation := rising(10, 1, int(to/tt.step))
+			values, notation := rising(10, 1, int(to/tt.step), gapIndices(tt.gaps, tt.step)...)
 
 			results, err := detect.Evaluate(band, detect.Range{
 				Start: epoch(from),
@@ -355,27 +449,72 @@ func unitTest(ruleFile, input string, step time.Duration, results []detect.Resul
 }
 
 // rising is count+1 samples climbing by delta, as values and as the promtool
-// notation for the same numbers.
+// notation for the same numbers, with a NaN at each index in gaps standing
+// for an instant that holds no sample.
 //
 // A climbing series is deliberate for the seasonal cases. Every offset
 // window sits at a different level, so the variance of the per-window means
 // is a real quantity rather than zero, and the identity the compiler relies
 // on is exercised rather than satisfied trivially.
-func rising(start, delta float64, count int) ([]float64, string) {
+func rising(start, delta float64, count int, gaps ...int) ([]float64, string) {
 	values := make([]float64, 0, count+1)
 	for i := 0; i <= count; i++ {
+		if slices.Contains(gaps, i) {
+			values = append(values, math.NaN())
+			continue
+		}
 		values = append(values, start+delta*float64(i))
 	}
-	return values, fmt.Sprintf("%s+%sx%d",
-		strconv.FormatFloat(start, 'g', -1, 64),
-		strconv.FormatFloat(delta, 'g', -1, 64), count)
+	return values, notation(values, delta)
+}
+
+// gapIndices turns gap instants into indices into the series.
+func gapIndices(gaps []time.Duration, step time.Duration) []int {
+	out := make([]int, 0, len(gaps))
+	for _, at := range gaps {
+		out = append(out, int(at/step))
+	}
+	return out
+}
+
+// notation is the promtool input_series spelling of values: a gap is `_`,
+// and a run of samples climbing by delta collapses to the `first+deltaxN`
+// form so that three weeks of series stays one short line.
+func notation(values []float64, delta float64) string {
+	var tokens []string
+	for i := 0; i < len(values); {
+		if math.IsNaN(values[i]) {
+			tokens = append(tokens, "_")
+			i++
+			continue
+		}
+		run := i
+		for run+1 < len(values) && values[run+1] == values[run]+delta {
+			run++
+		}
+		token := strconv.FormatFloat(values[i], 'g', -1, 64)
+		if run > i {
+			token = fmt.Sprintf("%s+%sx%d", token,
+				strconv.FormatFloat(delta, 'g', -1, 64), run-i)
+		}
+		tokens = append(tokens, token)
+		i = run + 1
+	}
+	return strings.Join(tokens, " ")
 }
 
 // points puts the values on the same grid promtool evaluates on: one sample
 // per step from the epoch, which is where a promtool unit test starts.
+//
+// A NaN is dropped rather than carried. A gap is an instant with no sample,
+// which is what promtool's `_` feeds the rules, and a NaN handed to
+// [detect.Spec] would make the band undefined instead.
 func points(values []float64, step time.Duration) []prometheus.Point {
 	out := make([]prometheus.Point, 0, len(values))
 	for i, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
 		out = append(out, prometheus.Point{At: epoch(time.Duration(i) * step), Value: v})
 	}
 	return out
