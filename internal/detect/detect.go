@@ -92,8 +92,8 @@
 // # Seasonality and how much history a band needs
 //
 // Spec.Offsets are how far back the window is taken, one window per offset,
-// pooled into a single sample set. No offsets means one window ending at the
-// instant itself. Daily seasonality is a short window at offsets of a day,
+// each weighing the same in the band they combine into. No offsets means one
+// window ending at the instant itself. Daily seasonality is a short window at offsets of a day,
 // two days and so on; weekly seasonality is the same at multiples of a week.
 //
 // [Spec.Lookback] is the consequence, and the backtest has to extend its
@@ -254,6 +254,13 @@ var (
 	// preference to honour.
 	ErrOffset = errors.New("offsets must be distinct and not negative")
 
+	// ErrRobustOffsets reports a robust band over more than one offset
+	// window. A median is not a function of the per-window medians, so there
+	// is no way to combine the windows that both this package and a target
+	// can compute, and a band nothing can emit would be a backtest of
+	// nothing.
+	ErrRobustOffsets = errors.New("robust cannot combine more than one offset window")
+
 	// ErrMinWidth reports a negative minimum width.
 	ErrMinWidth = errors.New("minimum width must not be negative")
 
@@ -285,7 +292,7 @@ type Spec struct {
 	MinWidth float64
 
 	// MinSamples is how many samples one window must hold before a band is
-	// worth computing. A band pooling offsets applies it to each window
+	// worth computing. A band over several offsets applies it to each window
 	// separately, so one empty window withholds the band however much
 	// history the others hold.
 	//
@@ -308,6 +315,9 @@ func (s Spec) Validate() error {
 		case ScaleMAD, ScaleIQR:
 		default:
 			return fmt.Errorf("%q: %w", s.RobustScale, ErrScale)
+		}
+		if len(s.Offsets) > 1 {
+			return fmt.Errorf("%d offset windows: %w", len(s.Offsets), ErrRobustOffsets)
 		}
 	default:
 		return fmt.Errorf("%q: %w", s.Strategy, ErrStrategy)
@@ -408,17 +418,47 @@ func (b Band) Lower() float64 { return b.Centre - b.HalfWidth() }
 // NaN breaches nothing because every comparison against it is false.
 func (b Band) Breaches(v float64) bool { return v > b.Upper() || v < b.Lower() }
 
-// band computes the band over a pooled window.
-func (s Spec) band(pool []float64) Band {
+// band computes the band over one window per offset.
+//
+// # Why each window weighs the same
+//
+// The centre is the mean of the per-window means, and the scale is the
+// square root of the mean of the per-window variances plus the variance of
+// those means. Every window therefore counts for the same share of the band
+// however many samples it holds.
+//
+// That is what the compiled rule can compute. PromQL has no way to gather
+// the samples from several range selectors into one set, so internal/rules
+// records an `avg_over_time` and a `stddev_over_time` per offset and combines them,
+// and weighting a window by its sample count there would need a
+// `count_over_time` series per offset on top of the mean and the variance
+// each one already records. Taking one mean over all the samples instead
+// gives the same number only while every window holds the same count, and a
+// scrape gap is enough to break that. Equal weight here makes the two forms
+// the same arithmetic rather than the same number under a condition on the
+// data.
+//
+// A single window is unaffected: the mean of one mean is that mean, its
+// deviation from the centre is zero, and the scale is the standard deviation
+// over the window.
+func (s Spec) band(windows [][]float64) Band {
 	b := Band{Margin: margins[s.Sensitivity], MinWidth: s.MinWidth}
 
 	switch s.Strategy {
 	case Adaptive:
-		b.Centre = mean(pool)
-		b.Scale = stddev(pool, b.Centre)
+		means := make([]float64, len(windows))
+		variances := make([]float64, len(windows))
+		for i, w := range windows {
+			means[i] = mean(w)
+			variances[i] = variance(w, means[i])
+		}
+		b.Centre = mean(means)
+		b.Scale = math.Sqrt(mean(variances) + variance(means, b.Centre))
 
 	case Robust:
-		sorted := slices.Sorted(slices.Values(pool))
+		// [Spec.Validate] refuses more than one offset window, because a
+		// median of several windows is not a function of their medians.
+		sorted := slices.Sorted(slices.Values(windows[0]))
 		b.Centre = quantile(0.5, sorted)
 
 		switch s.RobustScale {
@@ -460,12 +500,18 @@ func StdDev(vs []float64) float64 { return stddev(vs, mean(vs)) }
 // not the point: the point is that the backtest and the rule use the same
 // one.
 func stddev(vs []float64, mean float64) float64 {
+	return math.Sqrt(variance(vs, mean))
+}
+
+// variance is the square of [stddev], which is the form the band combines
+// windows in.
+func variance(vs []float64, mean float64) float64 {
 	var sum float64
 	for _, v := range vs {
 		d := v - mean
 		sum += d * d
 	}
-	return math.Sqrt(sum / float64(len(vs)))
+	return sum / float64(len(vs))
 }
 
 // Quantile is [quantile] over a slice the caller has already sorted.

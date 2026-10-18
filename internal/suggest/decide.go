@@ -22,10 +22,10 @@ const (
 	// they agree and the ratio is near one. A ratio of one and a half is a
 	// series where a minority of samples is contributing half again as much
 	// width as the bulk of it, which is the failure the robust strategy
-	// exists for. Lower and ordinary noise drafts `robust`, which costs a
-	// seasonal band the ability to pool more than one window at all: see the
-	// refusal internal/rules makes of a pooled median. Higher and a series
-	// whose daily spike is already hiding the next one drafts `adaptive`.
+	// exists for. Lower and ordinary noise drafts `robust`, which a
+	// measured seasonal shape then overrules, since no band can be both.
+	// Higher and a series whose daily spike is already hiding the next one
+	// drafts `adaptive`.
 	spikeRatio = 1.5
 
 	// seasonalCorrelation is the correlation at a lag that drafts that lag's
@@ -119,6 +119,26 @@ func Decide(p Profile) (Decision, error) {
 	seasonality, evidence := seasonality(fit)
 	decision.Seasonality = seasonality
 	decision.Evidence = append(decision.Evidence, evidence)
+
+	// The only two decisions here that can contradict each other. A band
+	// over several offset windows combines them by their means and
+	// variances, and a median is not a function of the per-window medians,
+	// so internal/detect refuses `robust` with any seasonality and a
+	// document holding both would fail `feno generate`.
+	//
+	// The shape wins. A repeating shape is a property of the series that the
+	// band reads, where the strategy is a choice about how the width is
+	// taken, and an author who would rather have the robust scale can delete
+	// the seasonality block. The evidence says that, because `adaptive` on a
+	// spiky series otherwise reads as a profile that missed the spikes.
+	if decision.Strategy == detect.Robust && len(decision.Seasonality) > 0 {
+		decision.Strategy = detect.Adaptive
+		decision.Evidence = append(decision.Evidence, fmt.Sprintf(
+			"strategy %s after all: the scales above asked for %s, but a seasonal band takes a mean and a "+
+				"variance per offset window and no combination of per-window medians is a median. Delete the "+
+				"seasonality above to draft %s instead, and the band then reads one window ending at the instant",
+			detect.Adaptive, detect.Robust, detect.Robust))
+	}
 
 	decision.Evidence = append(decision.Evidence,
 		fmt.Sprintf("sensitivity %s: not profiled. How many units of scale is a policy about who gets paged, "+

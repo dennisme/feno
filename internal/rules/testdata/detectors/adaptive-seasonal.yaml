@@ -1,4 +1,4 @@
-# Daily and weekly pooled, which is six windows, plus an absolute floor on
+# Daily and weekly together, which is six windows, plus an absolute floor on
 # the band's width.
 apiVersion: anomaly.openslo.io/v1alpha
 kind: AnomalyDetector

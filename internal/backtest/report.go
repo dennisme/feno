@@ -193,11 +193,11 @@ func describe(band detect.Spec) string {
 	parts = append(parts, string(band.Sensitivity),
 		fmt.Sprintf("window %s", duration(band.Window)))
 	if n := len(band.Offsets); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d pooled offsets", n))
+		parts = append(parts, fmt.Sprintf("%d offsets", n))
 	}
-	// The floor is a count per window, so a band pooling offsets says which
-	// number it is: a reader comparing it against the instants a report calls
-	// cold would otherwise read it as a floor on the pool.
+	// The floor is a count per window, so a band over several offsets says
+	// which number it is: a reader comparing it against the instants a report
+	// calls cold would otherwise read it as a floor on all of them together.
 	minimum := fmt.Sprintf("%d samples minimum", band.MinSamples)
 	if len(band.Offsets) > 0 {
 		minimum += " per window"

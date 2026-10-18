@@ -39,13 +39,13 @@ const (
 	DefaultMinCoverage = 0.75
 )
 
-// seasonalPeriods is how many periods back a seasonal band pools history
+// seasonalPeriods is how many periods back a seasonal band reads history
 // from.
 //
-// Three, for two reasons that both have a cost on either side. A pooled set
-// drawn from two periods gives a median that is just the midpoint of two
-// windows, so the robust strategy stops being robust; three is the smallest
-// count where an unusual period can be outvoted. Going further is not free:
+// Three, for two reasons that both have a cost on either side. Two periods
+// give a centre that is just the midpoint of two windows, so an unusual
+// period moves it as far as an ordinary one; three is the smallest count
+// where an unusual period can be outvoted. Going further is not free:
 // PromQL reaches a seasonal offset by chaining `offset`, which is a
 // recording rule per offset, so daily and weekly together already cost six
 // rules against the six to ten the whole band is budgeted at in spec.md Part
@@ -110,10 +110,10 @@ var (
 // The floor is two samples, since a scale needs two and [detect.Spec]
 // rejects fewer.
 //
-// One window and not the pool, because [detect.Spec.MinSamples] is a floor
-// each offset window clears on its own. A seasonal band pooling three
-// windows therefore holds three times this count when it reports, and a
-// band whose third window is empty reports nothing, which is what the rule
+// One window and not all of them together, because [detect.Spec.MinSamples]
+// is a floor each offset window clears on its own. A seasonal band over
+// three windows therefore holds three times this count when it reports, and
+// a band whose third window is empty reports nothing, which is what the rule
 // does.
 func (d AnomalyDetector) Band(step time.Duration) (detect.Spec, error) {
 	if step <= 0 {
@@ -176,11 +176,11 @@ func (d AnomalyDetector) Band(step time.Duration) (detect.Spec, error) {
 // taken.
 //
 // Each name contributes its period times one through [seasonalPeriods], and
-// naming both pools the union: yesterday, the day before and the day before
+// naming both takes the union: yesterday, the day before and the day before
 // that, plus the same time on each of the last three weeks. The union is not
 // the statistically clean choice and the cost is worth stating. Weekly
 // offsets already hold time of day fixed, so they separate a Tuesday from a
-// Sunday; the daily offsets in the same pool do not, so on a weekday band
+// Sunday; the daily offsets beside them do not, so on a weekday band
 // they pull in whatever the preceding weekend did. That widens the band,
 // which is the direction that pages fewer people, and an author who wants
 // day of week honoured strictly writes `seasonality: [weekly]` and means it.

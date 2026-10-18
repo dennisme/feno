@@ -9,29 +9,32 @@
 // arithmetic in this package is the signal that the representation is
 // missing a field, not an invitation to work around it.
 //
-// # Why pooled seasonality forces the rule shape it does
+// # Why seasonality forces the rule shape it does
 //
-// [detect.Spec] pools one window per offset into a single sample set and
-// takes one centre and one scale from the pool. PromQL has no way to express
-// that directly: `quantile_over_time` reads one range selector, and there is
-// no union of six disjoint ranges to take a median of.
-//
-// For the adaptive strategy the pool is still reachable exactly, because a
-// mean and a population variance decompose. With N windows of equal length,
-// the pooled mean is the mean of the per-window means, and the pooled
-// variance is the mean of the per-window variances plus the variance of
-// those means. Both terms are ordinary PromQL over N known offsets, so the
-// generated rule computes the same number the backtest does rather than
+// [detect.Spec] takes one window per offset and combines them with equal
+// weight: the centre is the mean of the per-window means, and the scale is
+// the square root of the mean of the per-window variances plus the variance
+// of those means. Both terms are ordinary PromQL over N known offsets, so
+// the generated rule computes the same number the backtest does rather than
 // something close to it.
 //
-// For the robust strategy it is not reachable at all. A median of a pool is
-// not a function of the per-window medians, so `robust` with any seasonality
-// cannot be expressed on this target and [Emit] refuses it rather than
-// emitting a median of medians that would look plausible and disagree with
-// every backtest. spec.md Part 9 asked for exactly one deliberately
-// uncompilable specification to exercise the degradation path while
-// Prometheus is the only target; this is that case, and it was found rather
-// than invented.
+// The band is defined that way because of what PromQL cannot do. There is
+// no union of six disjoint range selectors, so a rule cannot gather the
+// samples into one set, and weighting each window by its sample count would
+// need a `count_over_time` series per offset on top of the mean and the
+// variance each one already records. One mean over all the samples equals
+// the mean of the means only while every window holds the same count, and a
+// scrape gap is enough to break that, so the representation weighs the
+// windows equally and both forms are the same arithmetic.
+//
+// The robust strategy has no such decomposition. A median is not a function
+// of the per-window medians, so `robust` over more than one offset window is
+// a band neither this package nor internal/detect can compute, and
+// [detect.Spec.Validate] refuses it rather than letting a median of medians
+// look plausible and disagree with every backtest. spec.md Part 9 asked for
+// exactly one deliberately uncompilable specification to exercise that path
+// while Prometheus is the only target; this is that case, and it was found
+// rather than invented.
 //
 // # Where this departs from the Grafana reference
 //
@@ -43,8 +46,8 @@
 // backtest evaluates [detect.Spec]:
 //
 //   - The reference computes a band per lookback and takes the envelope with
-//     `max without(look_back)`. This pools, because that is what the
-//     representation does.
+//     `max without(look_back)`. This combines the windows into one band,
+//     because that is what the representation does.
 //   - The reference offsets by a period minus half the window, `offset
 //     167h30m` for a one hour window at a week, which centres the window on
 //     the same time of day. Offsets here are the exact durations in
@@ -71,8 +74,8 @@
 // The one place the rule does refuse is a window holding nothing at all:
 // `avg_over_time` over an empty range returns no sample, so every rule
 // downstream of it drops the series. That is why the floor internal/detect
-// applies is a count per window rather than on the pool, and the parity
-// test asserts both sides refusing there.
+// applies is a count each window clears on its own, and the parity test
+// asserts both sides refusing there.
 //
 // # One group per detector, one interval
 //
@@ -85,16 +88,16 @@
 // otherwise have to reproduce. The cost is that seasonal offsets re-read
 // their windows at the band's own interval rather than a slower one.
 //
-// # What a pooled seasonal band costs
+// # What a seasonal band costs
 //
 // Two recording rules per offset, plus the level, the centre, the scale, the
 // half width and the two edges. Daily and weekly together is six offsets, so
 // nineteen recording rules for one detector, against the six to ten spec.md
-// Part 4 budgets a band at. That number is a consequence of pooling rather
-// than of this compiler: an envelope over per-offset bands, which is what
-// the Grafana reference computes, needs one band per offset and no
-// decomposition. Worth weighing against the pooling decision rather than
-// absorbing quietly.
+// Part 4 budgets a band at. That number is a consequence of combining the
+// windows into one band rather than of this compiler: an envelope over
+// per-offset bands, which is what the Grafana reference computes, needs one
+// band per offset and no decomposition. Worth weighing against the shape of
+// the band rather than absorbing quietly.
 package rules
 
 import (
@@ -113,12 +116,6 @@ import (
 )
 
 var (
-	// ErrUnsupported reports a band this target cannot express at all, as
-	// opposed to one it expresses in a weaker form. The difference matters
-	// to a caller: a degradation is a note in a report, and this is a
-	// specification that has to change.
-	ErrUnsupported = errors.New("not expressible in PromQL")
-
 	// ErrName reports a detector whose name cannot be part of a Prometheus
 	// metric name, or two that would compile to the same one.
 	ErrName = errors.New("detector name")
@@ -235,13 +232,10 @@ func Emit(target Target, step time.Duration, src Source, detectors ...spec.Detec
 
 		band, err := d.Band(step)
 		if err != nil {
-			return Output{}, err
+			return Output{}, fmt.Errorf("detector %q: %w", d.Metadata.Name, err)
 		}
 
-		group, degraded, err := compile(target, name, d, band, query, step)
-		if err != nil {
-			return Output{}, err
-		}
+		group, degraded := compile(target, name, d, band, query, step)
 		file.Groups = append(file.Groups, group)
 		if degraded != nil {
 			out.Degradations = append(out.Degradations, *degraded)
@@ -317,7 +311,7 @@ func describe(target Target, band detect.Spec) string {
 	}
 	parts = append(parts, fmt.Sprintf("window %s", promDuration(band.Window)))
 	if len(band.Offsets) > 0 {
-		parts = append(parts, fmt.Sprintf("%d pooled offsets", len(band.Offsets)))
+		parts = append(parts, fmt.Sprintf("%d offsets", len(band.Offsets)))
 	}
 	return strings.Join(parts, ", ")
 }

@@ -43,9 +43,10 @@ func golden(t *testing.T, name string, got []byte) {
 
 // profileOf is the history every golden draft is made from: three weeks at a
 // five minute step, fully covered, with a daily shape and a standard
-// deviation far enough above the interquartile scale to draft the robust
-// strategy. Fixed rather than read, so the golden files say what the
-// decisions were and not what a server was doing.
+// deviation far enough above the interquartile scale to ask for the robust
+// strategy, which the daily shape then overrules. Fixed rather than read, so
+// the golden files say what the decisions were and not what a server was
+// doing.
 func profileOf(query string) Profile {
 	return Profile{
 		Query:    query,

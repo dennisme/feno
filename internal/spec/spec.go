@@ -84,10 +84,10 @@ const Kind = "AnomalyDetector"
 type Seasonality string
 
 const (
-	// Daily pools the same time of day on preceding days.
+	// Daily reads the same time of day on preceding days.
 	Daily Seasonality = "daily"
 
-	// Weekly pools the same time of week on preceding weeks, which is the
+	// Weekly reads the same time of week on preceding weeks, which is the
 	// one that separates a Tuesday from a Sunday.
 	Weekly Seasonality = "weekly"
 )

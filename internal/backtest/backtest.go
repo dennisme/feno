@@ -20,7 +20,7 @@
 // [detect.Spec.Lookback] is how much history has to exist before an instant
 // for a band to be computable at it. So a request for the last thirty days is
 // a request for a verdict on thirty days, and the read is longer than that by
-// the lookback. A weekly band pools three weeks of offsets, so thirty days
+// the lookback. A weekly band reads three weeks of offsets, so thirty days
 // reported is fifty-one days read.
 //
 // The boundary goes there rather than the other way round. Reading thirty days

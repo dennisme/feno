@@ -333,13 +333,13 @@ func TestEvaluatePoolsOffsets(t *testing.T) {
 }
 
 // TestEvaluateFloorsEachWindow is the coverage floor being per window rather
-// than on the pool.
+// than a count over all of them together.
 //
 // The band the spec compiles to reads each offset with its own
 // `avg_over_time`, and one over an empty range returns no sample, so the
-// whole chain drops the series. A pooled floor would report a band here from
-// the one window that has history, and the backtest would then claim pages
-// the rule could never produce.
+// whole chain drops the series. A floor over every window at once would
+// report a band here from the one window that has history, and the backtest
+// would then claim pages the rule could never produce.
 func TestEvaluateFloorsEachWindow(t *testing.T) {
 	spec := Spec{
 		Strategy:    Adaptive,
@@ -351,7 +351,7 @@ func TestEvaluateFloorsEachWindow(t *testing.T) {
 
 	// Minutes 1 and 2 hold nothing, which is the window the further offset
 	// selects at minute 5. The nearer one still selects minutes 3 and 4, so a
-	// floor of two on the pool would be clear.
+	// floor of two over both windows at once would be clear.
 	ps := []prometheus.Point{
 		{At: at(3), Value: 6}, {At: at(4), Value: 8}, {At: at(5), Value: 100},
 	}

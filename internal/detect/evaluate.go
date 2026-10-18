@@ -96,14 +96,14 @@ func Evaluate(spec Spec, r Range, points []prometheus.Point) ([]Result, error) {
 
 		result := Result{Sample: episode.Sample{At: t}, Value: value}
 
-		switch pool, state := spec.pool(points, t); state {
-		case poolUndefined:
+		switch windows, state := spec.windows(points, t); state {
+		case windowsUndefined:
 			result.Status = Undefined
-		case poolShort:
+		case windowsShort:
 			result.Status = Cold
 		default:
 			result.Status = Evaluated
-			result.Band = spec.band(pool)
+			result.Band = spec.band(windows)
 			result.Breaching = result.Band.Breaches(value)
 		}
 
@@ -130,58 +130,55 @@ func Samples(results []Result) []episode.Sample {
 	return out
 }
 
-// poolState is why there is or is not a pool to compute a band from.
-type poolState int
+// windowState is why there is or is not a band to compute at an instant.
+type windowState int
 
 const (
-	// poolReady is every window holding enough finite samples.
-	poolReady poolState = iota
+	// windowsReady is every window holding enough finite samples.
+	windowsReady windowState = iota
 
-	// poolShort is a window under [Spec.MinSamples].
-	poolShort
+	// windowsShort is a window under [Spec.MinSamples].
+	windowsShort
 
-	// poolUndefined is a sample that is a NaN or an infinity.
-	poolUndefined
+	// windowsUndefined is a sample that is a NaN or an infinity.
+	windowsUndefined
 )
 
-// pool gathers the samples behind the band at t, one window per offset, and
-// reports whether they amount to a band.
+// windows gathers the samples behind the band at t, one window per offset,
+// and reports whether they amount to a band.
 //
-// Pooling is what makes a seasonal band one band: the samples from the same
-// hour of each of the last three weeks describe one expected level together,
-// and averaging three separate bands afterwards would not be the same
-// number.
+// The windows stay apart rather than becoming one sample set, because that
+// is the shape the band is combined in and the shape the compiled rule can
+// compute. See [Spec.band].
 //
-// # Why the floor is checked per window and not on the pool
+// # Why the floor is checked per window
 //
 // [Spec.MinSamples] is a floor each window clears on its own, so one empty
 // offset window withholds the band however much history the others hold.
 // The reason is the rule the band compiles to: a per-offset `avg_over_time`
 // over an empty range returns no sample, so the whole chain drops the series
-// and the rule reports nothing. A pooled floor would let twelve samples from
-// two full windows clear a floor of nine while the third window held
-// nothing, and the backtest would then report pages the rule could never
-// produce.
-//
-// It also bounds how far the two forms can drift where both do report a
-// band. The pooled mean and the mean of the per-offset means are equal only
-// for equal-length windows, and a floor per window is a floor on how unequal
-// those lengths get.
-func (s Spec) pool(points []prometheus.Point, t time.Time) ([]float64, poolState) {
-	var out []float64
-	for _, offset := range s.offsets() {
+// and the rule reports nothing. A floor on all the samples together would
+// let twelve samples from two full windows clear a floor of nine while the
+// third window held nothing, and the backtest would then report pages the
+// rule could never produce.
+func (s Spec) windows(points []prometheus.Point, t time.Time) ([][]float64, windowState) {
+	offsets := s.offsets()
+	out := make([][]float64, 0, len(offsets))
+	for _, offset := range offsets {
 		samples := window(points, t.Add(-offset), s.Window)
 		if len(samples) < s.MinSamples {
-			return nil, poolShort
+			return nil, windowsShort
 		}
-		for _, p := range samples {
+		values := make([]float64, len(samples))
+		for i, p := range samples {
 			if math.IsNaN(p.Value) || math.IsInf(p.Value, 0) {
-				return nil, poolUndefined
+				return nil, windowsUndefined
 			}
-			out = append(out, p.Value)
+			values[i] = p.Value
 		}
+		out = append(out, values)
 	}
-	return out, poolReady
+	return out, windowsReady
 }
 
 // window returns the points a range selector of width w ending at end would

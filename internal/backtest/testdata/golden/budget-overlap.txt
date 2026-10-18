@@ -1,4 +1,4 @@
-checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 5 samples minimum per window
+checkout-request-rate  adaptive, balanced, window 6h, 3 offsets, 5 samples minimum per window
   query                 sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
   step                  1h, for 2h
   requires              seasonal decomposition

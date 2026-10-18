@@ -123,36 +123,46 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// TestUncompilable is the degradation path spec.md Part 9 asks to exercise
-// while Prometheus is the only target. A refusal, not a warning: there is no
-// weaker form of this band to emit.
+// TestUncompilable is the refusal path spec.md Part 9 asks to exercise while
+// Prometheus is the only target. A refusal, not a warning: there is no
+// weaker form of this band to emit, and no target that could compute one.
+//
+// The refusal is [detect.Spec.Validate]'s rather than this package's,
+// because a robust band over several offset windows has no definition the
+// backtest can evaluate either. What this asserts is that Emit reports it
+// and names the detector it came from, since an author reading the error has
+// a file to open.
 func TestUncompilable(t *testing.T) {
 	detectors := load(t, "uncompilable", "robust-seasonal.yaml")
 	_, err := Emit(Target{ExperimentalFunctions: true}, step, Source{}, detectors...)
-	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("got %v, want %v", err, ErrUnsupported)
+	if !errors.Is(err, detect.ErrRobustOffsets) {
+		t.Fatalf("got %v, want %v", err, detect.ErrRobustOffsets)
 	}
-	for _, want := range []string{"checkout-errors", string(detect.RequireSeasonalDecomposition)} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error does not name %q: %v", want, err)
-		}
+	if want := "checkout-errors"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error does not name %q: %v", want, err)
 	}
 }
 
-// TestPooledVarianceDecomposes is the check behind the pooled scale
-// expression. The emitted rule computes the mean of the per-window variances
-// plus the variance of their means, and that has to be the population
-// variance over the pool internal/detect takes, not an approximation of it.
-func TestPooledVarianceDecomposes(t *testing.T) {
+// TestEqualWindowsAgreeWithOneSampleSet is why the parity cases without a
+// gap in them cannot tell one weighting from another.
+//
+// The band weighs every offset window the same: the mean of the per-window
+// means, and the mean of their variances plus the variance of those means.
+// Where the windows are all the same length that is exactly the mean and the
+// population variance over all the samples at once, so a case with full
+// windows would pass whichever weighting either side used. It takes a window
+// of a different length to tell them apart, which is what the gap cases in
+// evaluated_test.go are for.
+func TestEqualWindowsAgreeWithOneSampleSet(t *testing.T) {
 	windows := [][]float64{
 		{1, 2, 3, 4},
 		{10, 12, 14, 16},
 		{-5, 0, 5, 100},
 	}
 
-	var pool []float64
+	var every []float64
 	for _, w := range windows {
-		pool = append(pool, w...)
+		every = append(every, w...)
 	}
 
 	means := make([]float64, len(windows))
@@ -162,13 +172,13 @@ func TestPooledVarianceDecomposes(t *testing.T) {
 		variances[i] = variance(w, means[i])
 	}
 	centre := mean(means)
-	decomposed := mean(variances) + variance(means, centre)
+	combined := mean(variances) + variance(means, centre)
 
-	if got, want := centre, mean(pool); math.Abs(got-want) > 1e-9 {
-		t.Errorf("pooled centre: decomposed %v, direct %v", got, want)
+	if got, want := centre, mean(every); math.Abs(got-want) > 1e-9 {
+		t.Errorf("centre: per window %v, over every sample %v", got, want)
 	}
-	if want := variance(pool, mean(pool)); math.Abs(decomposed-want) > 1e-9 {
-		t.Errorf("pooled variance: decomposed %v, direct %v", decomposed, want)
+	if want := variance(every, mean(every)); math.Abs(combined-want) > 1e-9 {
+		t.Errorf("variance: per window %v, over every sample %v", combined, want)
 	}
 }
 

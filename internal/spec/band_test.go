@@ -37,15 +37,14 @@ func TestLoadedDetectorBecomesABand(t *testing.T) {
 		want detect.Spec
 	}{
 		{
-			// Robust with no robustScale authored, daily and weekly pooled,
+			// Daily and weekly together, which is six offset windows, and
 			// the default coverage over an hour at a minute step: three
 			// quarters of sixty samples, which each of the six windows
 			// clears on its own.
 			name: "checkout-request-rate",
 			step: time.Minute,
 			want: detect.Spec{
-				Strategy:    detect.Robust,
-				RobustScale: detect.ScaleIQR,
+				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Conservative,
 				Window:      time.Hour,
 				Offsets:     []time.Duration{day, 2 * day, 3 * day, week, 2 * week, 3 * week},
@@ -151,7 +150,7 @@ func TestSeasonalOffsets(t *testing.T) {
 	}
 }
 
-// TestOffsetsAreDistinct is why daily and weekly can be pooled at all:
+// TestOffsetsAreDistinct is why daily and weekly can be read together at all:
 // internal/detect rejects a repeated offset, and a week is not a multiple of
 // any of the first three days.
 func TestOffsetsAreDistinct(t *testing.T) {
