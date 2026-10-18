@@ -41,10 +41,12 @@
 //   - [Evaluated]: the band was computed and Breaching means what it says.
 //   - [Absent]: there was no sample at that instant. The series was stale, or
 //     the query returned nothing for it.
-//   - [Cold]: the window held fewer than Spec.MinSamples samples. A band
-//     taken from a quarter-filled window is a confident number derived from
+//   - [Cold]: a window held fewer than Spec.MinSamples samples. A band taken
+//     from a quarter-filled window is a confident number derived from
 //     nothing, and reporting it as "not breaching" would let a backtest
-//     claim a quiet first week that was really an empty one.
+//     claim a quiet first week that was really an empty one. The floor is
+//     per window, so a seasonal band is cold when any one of its offset
+//     windows is short.
 //   - [Undefined]: the window held a NaN or an infinity, so the band is NaN.
 //
 // [Undefined] is separate from [Cold] because more history fixes a cold band
@@ -282,12 +284,15 @@ type Spec struct {
 	// of any size at all breaches. It is in the series' own units.
 	MinWidth float64
 
-	// MinSamples is how many samples the pooled window must hold before a
-	// band is worth computing. There is no default, because this package does
-	// not know the step the samples were read at and a guess here is the
-	// difference between a warm-up and a reported quiet period. The caller
-	// has the step and the window, so the caller decides what coverage it
-	// will accept.
+	// MinSamples is how many samples one window must hold before a band is
+	// worth computing. A band pooling offsets applies it to each window
+	// separately, so one empty window withholds the band however much
+	// history the others hold.
+	//
+	// There is no default, because this package does not know the step the
+	// samples were read at and a guess here is the difference between a
+	// warm-up and a reported quiet period. The caller has the step and the
+	// window, so the caller decides what coverage it will accept.
 	MinSamples int
 }
 

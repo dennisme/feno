@@ -68,6 +68,12 @@
 // the few samples present, which is why the coverage policy is worth
 // reading in a backtest report before the rules ship rather than after.
 //
+// The one place the rule does refuse is a window holding nothing at all:
+// `avg_over_time` over an empty range returns no sample, so every rule
+// downstream of it drops the series. That is why the floor internal/detect
+// applies is a count per window rather than on the pool, and the parity
+// test asserts both sides refusing there.
+//
 // # One group per detector, one interval
 //
 // Rules inside a Prometheus group evaluate in order and see the results that

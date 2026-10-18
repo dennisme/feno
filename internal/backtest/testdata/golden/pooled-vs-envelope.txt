@@ -1,5 +1,5 @@
 history             seasonal-shape.json, 103 samples at 1h
-detector            checkout-request-rate: adaptive, balanced, window 6h, 3 pooled offsets, 14 samples minimum
+detector            checkout-request-rate: adaptive, balanced, window 6h, 3 pooled offsets, 5 samples minimum per window
 reported window     2026-09-04T06:00:00Z .. 2026-09-05T06:00:00Z  (25 instants)
 hold duration       2h
 

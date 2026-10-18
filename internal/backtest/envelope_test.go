@@ -161,12 +161,6 @@ func evaluateEnvelope(
 	for _, offset := range pooledSpec.Offsets {
 		spec := pooledSpec
 		spec.Offsets = []time.Duration{offset}
-		// The same coverage fraction over a window a third the size. The
-		// pooled count is that fraction of the whole pool, so dividing it by
-		// the number of offsets is the fraction applied to one window.
-		spec.MinSamples = max(int(math.Ceil(
-			float64(pooledSpec.MinSamples)/float64(len(pooledSpec.Offsets)))), 2)
-
 		results, err := detect.Evaluate(spec, r, points)
 		if err != nil {
 			return nil, nil, fmt.Errorf("offset %v: %w", offset, err)

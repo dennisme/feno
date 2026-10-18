@@ -55,7 +55,8 @@ weeks on flat demo traffic is what an over-tuned detector looks like.
 
 The first line is the band, in the terms the document wrote it in, so a
 report pasted into a ticket says which band produced it. A seasonal band also
-says how many offsets it pooled.
+says how many offsets it pooled, and the sample count it prints says `per
+window`, because that is the window the floor applies to.
 
 | Line | What it says |
 | --- | --- |
@@ -124,7 +125,7 @@ of series-instants, because every series is evaluated at every instant.
 
 | Status | What happened |
 | --- | --- |
-| `cold` | Too few samples in the window to compute a band. Raise or lower [`minCoverage`](detectors.md#mincoverage) once you know which |
+| `cold` | Too few samples in a window to compute a band. A seasonal band is cold when any one of its offset windows is short, however full the others are. Raise or lower [`minCoverage`](detectors.md#mincoverage) once you know which |
 | `absent` | The series had no sample at that instant |
 | `undefined` | A band was computed and the comparison could not be made, such as a NaN value |
 

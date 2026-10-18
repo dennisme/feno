@@ -38,8 +38,9 @@ func TestLoadedDetectorBecomesABand(t *testing.T) {
 	}{
 		{
 			// Robust with no robustScale authored, daily and weekly pooled,
-			// the default coverage over six windows of an hour at a minute
-			// step: 6 * 60 samples, three quarters of them.
+			// the default coverage over an hour at a minute step: three
+			// quarters of sixty samples, which each of the six windows
+			// clears on its own.
 			name: "checkout-request-rate",
 			step: time.Minute,
 			want: detect.Spec{
@@ -49,7 +50,7 @@ func TestLoadedDetectorBecomesABand(t *testing.T) {
 				Window:      time.Hour,
 				Offsets:     []time.Duration{day, 2 * day, 3 * day, week, 2 * week, 3 * week},
 				MinWidth:    0.5,
-				MinSamples:  270,
+				MinSamples:  45,
 			},
 		},
 		{

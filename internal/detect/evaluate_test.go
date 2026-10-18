@@ -311,7 +311,7 @@ func TestEvaluatePoolsOffsets(t *testing.T) {
 		Sensitivity: Balanced,
 		Window:      2 * step,
 		Offsets:     []time.Duration{step, 3 * step},
-		MinSamples:  4,
+		MinSamples:  2,
 	}
 
 	// At minute 5 the nearer offset selects minutes 3 and 4, holding 6 and 8,
@@ -330,6 +330,43 @@ func TestEvaluatePoolsOffsets(t *testing.T) {
 	near(t, got[0].Band.Centre, 5, "centre")
 	// Population variance of {2,4,6,8} is (9+1+1+9)/4 = 5.
 	near(t, got[0].Band.Scale, math.Sqrt(5), "scale")
+}
+
+// TestEvaluateFloorsEachWindow is the coverage floor being per window rather
+// than on the pool.
+//
+// The band the spec compiles to reads each offset with its own
+// `avg_over_time`, and one over an empty range returns no sample, so the
+// whole chain drops the series. A pooled floor would report a band here from
+// the one window that has history, and the backtest would then claim pages
+// the rule could never produce.
+func TestEvaluateFloorsEachWindow(t *testing.T) {
+	spec := Spec{
+		Strategy:    Adaptive,
+		Sensitivity: Balanced,
+		Window:      2 * step,
+		Offsets:     []time.Duration{step, 3 * step},
+		MinSamples:  2,
+	}
+
+	// Minutes 1 and 2 hold nothing, which is the window the further offset
+	// selects at minute 5. The nearer one still selects minutes 3 and 4, so a
+	// floor of two on the pool would be clear.
+	ps := []prometheus.Point{
+		{At: at(3), Value: 6}, {At: at(4), Value: 8}, {At: at(5), Value: 100},
+	}
+	rng := Range{Start: at(5), End: at(5), Step: step}
+
+	got, err := Evaluate(spec, rng, ps)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got[0].Status != Cold {
+		t.Errorf("status = %v, want %v", got[0].Status, Cold)
+	}
+	if got[0].Band != (Band{}) {
+		t.Errorf("band = %+v, want no band", got[0].Band)
+	}
 }
 
 func TestSamples(t *testing.T) {

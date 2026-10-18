@@ -188,18 +188,21 @@ func TestAnalyse(t *testing.T) {
 			peakAt:   time.Date(2026, 9, 4, 11, 0, 0, 0, time.UTC),
 		},
 		{
-			// The series begins twenty hours into the read, so the pooled
-			// window of the earliest reported instants holds twelve or
-			// thirteen samples against the fourteen the coverage policy
-			// demands. Fifteen instants are cold and the last ten are not.
-			// The sample is present at every one of them, so none of this is
-			// absence: a backtest reporting these as quiet would be reporting
-			// an empty warm-up as a clean detector.
+			// The series begins twenty hours into the read, which leaves the
+			// window taken three days back short while the nearer two are
+			// full. The floor is five of the six samples a six hour window
+			// holds at this step and it applies to each window, so the
+			// earliest instant with a band is the first whose three day
+			// window reaches far enough into the series: eighteen instants
+			// are cold and the last seven are not. The sample is present at
+			// every one of them, so none of this is absence: a backtest
+			// reporting these as quiet would be reporting an empty warm-up
+			// as a clean detector.
 			name:     "history that starts late is cold rather than quiet",
 			detector: "daily-seasonal.yaml",
 			history:  "late-start.json",
 			series:   1,
-			counts:   Counts{Evaluated: 10, Cold: 15},
+			counts:   Counts{Evaluated: 7, Cold: 18},
 		},
 		{
 			// Two instances spike over overlapping hours and a third never

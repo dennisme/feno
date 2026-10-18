@@ -105,10 +105,16 @@ var (
 //
 // What an author can say is how much of a window may be missing, which is
 // Detection.MinCoverage and is a fraction. The count is that fraction of
-// what a full pooled window holds, so the coverage policy is written once in
-// a document and the step arrives from whoever is about to evaluate or emit.
+// what one full window holds, so the coverage policy is written once in a
+// document and the step arrives from whoever is about to evaluate or emit.
 // The floor is two samples, since a scale needs two and [detect.Spec]
 // rejects fewer.
+//
+// One window and not the pool, because [detect.Spec.MinSamples] is a floor
+// each offset window clears on its own. A seasonal band pooling three
+// windows therefore holds three times this count when it reports, and a
+// band whose third window is empty reports nothing, which is what the rule
+// does.
 func (d AnomalyDetector) Band(step time.Duration) (detect.Spec, error) {
 	if step <= 0 {
 		return detect.Spec{}, fmt.Errorf("step %v: %w", step, ErrStep)
@@ -128,10 +134,9 @@ func (d AnomalyDetector) Band(step time.Duration) (detect.Spec, error) {
 	// exactly as many samples as the step divides into it. See the window
 	// section of internal/detect's package comment.
 	perWindow := int(window / step)
-	pooled := perWindow * max(len(offsets), 1)
-	if pooled < 2 {
+	if perWindow < 2 {
 		return detect.Spec{}, fmt.Errorf("window %v at step %v holds %d samples: %w",
-			window, step, pooled, ErrCoverage)
+			window, step, perWindow, ErrCoverage)
 	}
 
 	coverage := detection.MinCoverage
@@ -146,7 +151,7 @@ func (d AnomalyDetector) Band(step time.Duration) (detect.Spec, error) {
 		Window:      window,
 		Offsets:     offsets,
 		MinWidth:    detection.MinWidth,
-		MinSamples:  max(int(math.Ceil(coverage*float64(pooled))), 2),
+		MinSamples:  max(int(math.Ceil(coverage*float64(perWindow))), 2),
 	}
 
 	// The robust strategy needs a scale and internal/detect rejects an empty
