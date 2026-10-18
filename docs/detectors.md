@@ -109,11 +109,11 @@ The band, in the terms you write rather than the terms it is computed in.
 | `strategy` | required | `adaptive` or `robust`: how the centre and the spread are taken from the window |
 | `robustScale` | `iqr` when `strategy: robust` | `iqr` or `mad`: which measure of spread `robust` uses. Must be empty on `adaptive` |
 | `sensitivity` | required | `aggressive`, `balanced` or `conservative`: how far the band reaches either side of its centre |
-| `seasonality` | empty, a flat window | `daily`, `weekly`, or both: the periods history is pooled from |
+| `seasonality` | empty, a flat window | `daily`, `weekly`, or both: the periods history is read from. Not available on `strategy: robust` |
 | `class` | required | `requests`, `latency`, `errors` or `saturation`: what kind of signal this is |
 | `window` | `1h` | How much history one band is computed over |
 | `minWidth` | `0`, no floor | A floor on the band's full width, in the series' own units |
-| `minCoverage` | `0.75` | The fraction of a full window that must hold samples before a band is computed at all, required of every window a seasonal band pools |
+| `minCoverage` | `0.75` | The fraction of a full window that must hold samples before a band is computed at all, required of every window a seasonal band reads |
 
 ### strategy and robustScale
 
@@ -137,6 +137,13 @@ is filled in, because the reason to prefer it is a property of the server the
 rule will run on rather than of the band. Write `robustScale: mad` when you
 have that feature on.
 
+`robust` and `seasonality` together are refused, by `feno generate` and by
+`feno backtest` alike. A seasonal band reads one window per offset and
+combines them by their means and their spreads, and no combination of
+per-window medians is the median of the windows together, so there is no such
+band to compute. Pick one: the seasonal shape, with `adaptive`, or the robust
+scale, over a single window.
+
 ### sensitivity
 
 Sensitivity is the knob to turn first. It sets how many units of scale the
@@ -157,15 +164,21 @@ Empty is a flat window: one band from the `window` immediately before the
 instant. That is right for a series with no daily shape, and wrong for one
 where 3am and 3pm are different services.
 
-`daily` pools the same time of day on the preceding days. `weekly` pools the
+`daily` reads the same time of day on the preceding days. `weekly` reads the
 same time of week on preceding weeks, which is the one that tells a Tuesday
-from a Sunday. Both together pool both.
+from a Sunday. Both together read both.
 
-Three things follow from naming any:
+Four things follow from naming any:
 
-- Three periods back are pooled, not two. A set drawn from two periods gives
-  a median that is just the midpoint of two windows, so `robust` stops being
-  robust.
+- Three periods back are read, not two. Two windows give a centre that is
+  just their midpoint, which is a weaker description of a normal day than
+  three.
+- Every window weighs the same, whatever it holds. The centre is the average
+  of the per-window averages, and the spread is taken from the spread inside
+  the windows and the spread between them. A window thinned by a scrape gap
+  therefore counts as much as a full one, which is what keeps a backtest and
+  the generated rule on the same number: a rule reads each offset with its
+  own range selector and cannot weigh one against another.
 - `window` becomes the width of the window taken *at each offset*, not a span
   reaching back to them.
 - A backtest has to read further back before it can report anything: three
@@ -227,13 +240,13 @@ between a backtest and a ruler for the same detector, and you cannot be asked
 to track it. feno turns the fraction into a count from whatever step is about
 to be used, with a floor of two samples.
 
-A band with `seasonality` set asks it of every window it pools, not of the
-pool. One empty offset window gets no verdict even when the other two hold a
-full window each, which is what the generated rule does: it reads each offset
-with its own range selector, and one over an empty range returns nothing, so
-the whole chain drops the series. A fraction of the pool would let feno
-report breaches in a backtest that the rule on the server could never
-produce.
+A band with `seasonality` set asks it of every window separately, not of all
+the samples together. One empty offset window gets no verdict even when the
+other two hold a full window each, which is what the generated rule does: it
+reads each offset with its own range selector, and one over an empty range
+returns nothing, so the whole chain drops the series. A fraction of all the
+samples together would let feno report breaches in a backtest that the rule
+on the server could never produce.
 
 Three quarters is a judgement, so it is worth saying which way each direction
 is wrong. Too high and an ordinary scrape gap or a rolling restart turns

@@ -42,35 +42,30 @@ const paritySeries = "band_input"
 //
 // # Why the seasonal cases are the ones that matter
 //
-// A flat band is the same arithmetic twice. A seasonal band is not.
-// internal/detect collects the raw samples from every offset window into one
-// set and takes the mean and the standard deviation over all of it. PromQL
-// cannot pool, so [statistics] records a mean and a variance per offset and
-// combines them: the mean of the means, and the square root of the mean of
-// the variances plus the variance of the means. The two are equal for
-// equal-length windows, which is a claim about statistics rather than about
-// code, and it is the one place here where a disagreement would be a
-// different formula rather than a typo.
+// A flat band is the same arithmetic twice. A seasonal band reads one window
+// per offset and combines them, and the two implementations combine them
+// through different expressions: internal/detect averages the per-window
+// means and variances in Go, and [statistics] records a mean and a variance
+// per offset and writes the same combination as PromQL. This is the one
+// place here where a disagreement would be a different formula rather than
+// a typo.
 //
-// # Where that condition fails
+// # The cases with a gap in them
 //
-// Equal-length is a condition on the data, not a property of the band. The
-// last two cases hold a gap in one offset window and only one, so each names
-// its own cause: one window thinner than the others, and one window holding
-// nothing.
+// The last two hold a gap in one offset window and only one, because a band
+// whose windows are all the same length cannot tell equal weighting from any
+// other weighting.
 //
-// The empty one agrees, and the agreement is both sides refusing. The
-// coverage floor is a count each window clears on its own, so a window
-// holding nothing withholds the band in Go, and a per-offset `avg_over_time`
-// over an empty range returns no sample, so the rule chain drops the series.
-// The case asserts the absence at every instant.
+// The thin one is a window a sample short of the others, which is as unequal
+// as two reported windows can be: the coverage floor is a count each window
+// clears on its own, so anything thinner gets no band from either side. Both
+// forms weigh it as a whole window, so the two agree, and that agreement is
+// what dennisme/feno#28 was about.
 //
-// The thin one still disagrees and is skipped, pointing at dennisme/feno#28,
-// which carries the measured numbers. A per-window floor bounds that
-// disagreement rather than removing it: a window five samples of six deep
-// clears the floor and is still not the same length as a full one.
-// Asserting the current numbers would make a test of whichever side is
-// wrong.
+// The empty one agrees by both sides refusing. A window holding nothing is
+// under the floor, so Go withholds the band, and a per-offset
+// `avg_over_time` over an empty range returns no sample, so the rule chain
+// drops the series. The case asserts the absence at every instant.
 func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 	promtool, err := exec.LookPath("promtool")
 	if err != nil {
@@ -107,11 +102,6 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 		// holding nothing, so neither side reports a band and the
 		// expectation is the absence of one.
 		cold bool
-
-		// finding is a disagreement that has been measured and reported.
-		// The case is skipped rather than asserted, because an assertion on
-		// the current numbers would lock in whichever side is wrong.
-		finding string
 	}{
 		{
 			name: "adaptive",
@@ -150,7 +140,7 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			span:   15 * time.Minute,
 		},
 		{
-			name: "adaptive pooled over three days",
+			name: "adaptive over three days",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Balanced,
@@ -162,7 +152,7 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			span:   time.Hour,
 		},
 		{
-			name: "adaptive pooled over three weeks",
+			name: "adaptive over three weeks",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Balanced,
@@ -174,7 +164,7 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			span:   time.Hour,
 		},
 		{
-			name: "adaptive pooled over both periods",
+			name: "adaptive over both periods",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Balanced,
@@ -193,21 +183,18 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			// here: anything thinner and both sides refuse, which is the
 			// case below.
 			//
-			// internal/detect pools all seventeen samples and takes one mean
-			// over them, so the thin window carries five seventeenths of the
-			// centre. The compiled rule averages the three per-offset means
-			// with equal weight, so it carries a third. Those are the same
-			// number only for equal-length windows, which is the condition
-			// the parity cases above all satisfy.
+			// Both sides give the thin window a third of the centre, the
+			// same share a full window gets, so the centre at the instant
+			// asserted is 157.33333333333334 and the scale
+			// 117.58684733704985 in Go and in the rule alike.
 			//
-			// At the instant asserted the centre is 157.35294117647058
-			// pooled against 157.33333333333334 equally weighted, and the
-			// scale 120.99535293773043 against 117.58684733704985. The scale
-			// is the further out of the two, because the pooled variance
-			// identity rests on the same equal-length condition as the mean.
-			// The floor bounds the gap rather than closing it: a window may
-			// still be a sixth short of its neighbours.
-			name: "adaptive pooled over three days with a thin window",
+			// One mean over all seventeen samples, which is what Go took
+			// until dennisme/feno#28 was closed, would weigh that window by
+			// what it holds: five seventeenths of a centre of
+			// 157.35294117647058, against a scale of 120.99535293773043.
+			// The scale was the further out of the two, because the identity
+			// behind it rests on the same equal-length condition as the mean.
+			name: "adaptive over three days with a thin window",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Balanced,
@@ -219,7 +206,6 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			gaps: []time.Duration{
 				25 * time.Hour,
 			},
-			finding: "a thin offset window weights the two bands differently: dennisme/feno#28",
 		},
 		{
 			// The same window holding nothing at all, which both sides
@@ -232,13 +218,13 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			// `minCoverage: 0.5` is what makes that the thing asserted. At
 			// three samples of six per window the two full offsets clear
 			// the floor several times over, so the refusal here is the
-			// empty window and not a thin pool.
+			// empty window and not a thin one.
 			//
 			// The gaps run from the first instant the 48h window covers at
 			// the start of the asserted span to the last one it covers at
 			// the end, so every instant asserted here is the same case
 			// rather than only the first.
-			name: "adaptive pooled over three days with an empty window",
+			name: "adaptive over three days with an empty window",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
 				Sensitivity: detect.Balanced,
@@ -269,9 +255,6 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.finding != "" {
-				t.Skip(tt.finding)
-			}
 			if tt.mad {
 				// promtool 3.15.0 does not enable experimental functions in
 				// its unit tests, in either flag position, so the one band
@@ -379,10 +362,12 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 	}
 }
 
-// TestSeasonalRobustIsRefused is the other half of the seasonal story. A
-// median of a pool is not a function of the per-window medians, so there is
-// no decomposition to emit, and the compiler refuses rather than emitting
-// the pooled mean and calling it robust.
+// TestSeasonalRobustIsRefused is the other half of the seasonal story. The
+// band combines its offset windows by their means and variances, and a
+// median is not a function of the per-window medians, so there is nothing
+// for either implementation to combine. [detect.Spec.Validate] refuses the
+// band and Emit reports that rather than emitting the mean and calling it
+// robust.
 //
 // It belongs next to the parity test because that test can only compare what
 // compiles: a seasonal robust band quietly emitting an adaptive-shaped band
@@ -400,10 +385,10 @@ func TestSeasonalRobustIsRefused(t *testing.T) {
 	_, err := Emit(Target{}, time.Minute,
 		Source{Path: "parity.yaml", Specification: []byte("parity")}, parityDetector(detection))
 	if err == nil {
-		t.Fatal("Emit compiled a robust band over pooled windows")
+		t.Fatal("Emit compiled a robust band over several offset windows")
 	}
-	if !errors.Is(err, ErrUnsupported) {
-		t.Errorf("Emit error = %v, want %v", err, ErrUnsupported)
+	if !errors.Is(err, detect.ErrRobustOffsets) {
+		t.Errorf("Emit error = %v, want %v", err, detect.ErrRobustOffsets)
 	}
 }
 
@@ -444,12 +429,12 @@ func parityDetector(detection spec.Detection) spec.Detector {
 // asserted too, so a failure says which half of the band moved.
 //
 // The per-offset means and variances a seasonal band records are not
-// asserted. internal/detect never forms a per-window statistic: it pools the
-// samples and computes one mean and one deviation, so an expectation for a
-// single window's variance would be arithmetic written here rather than
-// either implementation's, which is the second implementation this test
-// exists to avoid. What those series add up to is the centre and the scale,
-// and both are asserted at every instant.
+// asserted. internal/detect computes the same two numbers per window but
+// returns only the band they combine into, so an expectation for a single
+// window's variance would be arithmetic written here rather than either
+// implementation's, which is the second implementation this test exists to
+// avoid. What those series add up to is the centre and the scale, and both
+// are asserted at every instant.
 //
 // An instant internal/detect reports no band at is asserted as an empty
 // expectation, which is what a rule whose range selector found nothing

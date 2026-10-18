@@ -54,55 +54,80 @@ func TestBand(t *testing.T) {
 	// Worked by hand over {1,2,3,4,5}. Mean 3, population variance
 	// (4+1+0+1+4)/5 = 2. Median 3, absolute deviations {2,1,0,1,2} whose
 	// median is 1. Quartiles 2 and 4, so an interquartile range of 2.
-	pool := []float64{1, 2, 3, 4, 5}
+	window := [][]float64{{1, 2, 3, 4, 5}}
 
 	tests := []struct {
 		name       string
 		spec       Spec
-		pool       []float64
+		windows    [][]float64
 		wantCentre float64
 		wantScale  float64
 	}{
 		{
 			name:       "adaptive is the mean and the population standard deviation",
 			spec:       Spec{Strategy: Adaptive},
-			pool:       pool,
+			windows:    window,
 			wantCentre: 3,
 			wantScale:  math.Sqrt2,
 		},
 		{
 			name:       "robust mad is the median and 1.4826 times the median deviation",
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleMAD},
-			pool:       pool,
+			windows:    window,
 			wantCentre: 3,
 			wantScale:  MADToSigma,
 		},
 		{
 			name:       "robust iqr is the median and the interquartile range over 1.349",
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleIQR},
-			pool:       pool,
+			windows:    window,
 			wantCentre: 3,
 			wantScale:  2 / IQRToSigma,
 		},
 		{
-			name:       "a flat pool has no spread at all",
+			name:       "a flat window has no spread at all",
 			spec:       Spec{Strategy: Adaptive},
-			pool:       []float64{5, 5, 5},
+			windows:    [][]float64{{5, 5, 5}},
 			wantCentre: 5,
 			wantScale:  0,
 		},
 		{
-			name:       "an unsorted pool gives the same robust answer",
+			name:       "an unsorted window gives the same robust answer",
 			spec:       Spec{Strategy: Robust, RobustScale: ScaleMAD},
-			pool:       []float64{4, 1, 5, 3, 2},
+			windows:    [][]float64{{4, 1, 5, 3, 2}},
 			wantCentre: 3,
 			wantScale:  MADToSigma,
+		},
+		{
+			// Two windows of three. The centre is (2 + 8) / 2 = 5, and
+			// every sample is the same distance from it as it would be from
+			// the mean over all six, so the scale is the same number either
+			// way: the mean of the variances is 2/3 and the variance of the
+			// means is 9, against (16+9+4+4+9+16)/6 over the six samples.
+			// This is the identity equal-length windows satisfy.
+			name:       "two windows of the same length weigh the same as their samples",
+			spec:       Spec{Strategy: Adaptive},
+			windows:    [][]float64{{1, 2, 3}, {7, 8, 9}},
+			wantCentre: 5,
+			wantScale:  math.Sqrt(58.0 / 6),
+		},
+		{
+			// The same two windows with one of them a single sample, which
+			// is where the identity stops holding. Each window is still
+			// half the band, so the centre is (2 + 9) / 2 = 5.5 rather than
+			// the 11/4 = 2.75 the four samples would give, and the scale is
+			// sqrt((2/3 + 0) / 2 + ((2-5.5)^2 + (9-5.5)^2) / 2).
+			name:       "a short window weighs the same as a long one",
+			spec:       Spec{Strategy: Adaptive},
+			windows:    [][]float64{{1, 2, 3}, {9}},
+			wantCentre: 5.5,
+			wantScale:  math.Sqrt(1.0/3 + 12.25),
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			b := tc.spec.band(tc.pool)
+			b := tc.spec.band(tc.windows)
 			near(t, b.Centre, tc.wantCentre, "centre")
 			near(t, b.Scale, tc.wantScale, "scale")
 		})
@@ -178,11 +203,12 @@ func TestBandEdges(t *testing.T) {
 // construction rather than by this code's say-so.
 func TestScalesAgree(t *testing.T) {
 	const n = 1001
-	pool := make([]float64, n)
-	for i := range pool {
+	samples := make([]float64, n)
+	for i := range samples {
 		p := (float64(i) + 0.5) / n
-		pool[i] = math.Sqrt2 * math.Erfinv(2*p-1)
+		samples[i] = math.Sqrt2 * math.Erfinv(2*p-1)
 	}
+	windows := [][]float64{samples}
 
 	specs := map[string]Spec{
 		"adaptive": {Strategy: Adaptive},
@@ -192,7 +218,7 @@ func TestScalesAgree(t *testing.T) {
 
 	for name, spec := range specs {
 		t.Run(name, func(t *testing.T) {
-			b := spec.band(pool)
+			b := spec.band(windows)
 			if math.Abs(b.Centre) > 0.01 {
 				t.Errorf("centre = %v, want 0", b.Centre)
 			}
@@ -331,6 +357,23 @@ func TestValidate(t *testing.T) {
 			want: ErrScale,
 		},
 		{
+			name: "robust over one offset window is still a median of one window",
+			spec: with(func(s *Spec) {
+				s.Strategy = Robust
+				s.RobustScale = ScaleIQR
+				s.Offsets = []time.Duration{24 * time.Hour}
+			}),
+		},
+		{
+			name: "robust over more than one offset window has no median to take",
+			spec: with(func(s *Spec) {
+				s.Strategy = Robust
+				s.RobustScale = ScaleIQR
+				s.Offsets = []time.Duration{24 * time.Hour, 48 * time.Hour}
+			}),
+			want: ErrRobustOffsets,
+		},
+		{
 			name: "an unknown sensitivity",
 			spec: with(func(s *Spec) { s.Sensitivity = "paranoid" }),
 			want: ErrSensitivity,
@@ -387,7 +430,7 @@ func TestMarginMatchesSensitivity(t *testing.T) {
 			Window:      time.Hour,
 			MinSamples:  2,
 		}
-		band := s.band([]float64{1, 2, 3})
+		band := s.band([][]float64{{1, 2, 3}})
 		if band.Margin != s.Margin() {
 			t.Errorf("%s: Margin() is %v, band carries %v", sensitivity, s.Margin(), band.Margin)
 		}

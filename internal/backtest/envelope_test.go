@@ -12,31 +12,36 @@ import (
 	"github.com/dennisme/feno/internal/prometheus"
 )
 
-// TestPooledVersusEnvelope measures the open question in internal/detect
+// TestCombinedVersusEnvelope measures the open question in internal/detect
 // rather than arguing it.
 //
-// [detect.Spec] pools one window per seasonal offset into a single sample set
-// and takes one centre and one scale from the pool. grafana/promql-anomaly-
+// [detect.Spec] reads one window per seasonal offset and combines them into
+// one band, every window weighing the same. grafana/promql-anomaly-
 // detection, which spec.md Part 9 points at as the proven reference, instead
 // computes a band per lookback and takes the envelope with
 // `max without(look_back)`. internal/rules' package comment records that the
-// two differ and that pooling is what the representation does; neither
+// two differ and that one band is what the representation does; neither
 // document has a number attached, because until there was a backtest there
 // was nothing that could produce one.
 //
-// This is the number. Both are run over the same history, which is a series
-// where one of the three pooled days ran high over the hours the band reads
-// from. Pooling folds that day into one centre and one scale, so the scale
-// absorbs it and the band grows wide enough to hide a real spike. The envelope
-// keeps the day separate: two tight bands and one high one, and a spike above
-// all three still breaches. The result is in testdata/golden.
+// This is the number, and it is a number against what runs: the combined form
+// here is the same arithmetic the compiled rule performs, which the parity
+// test in internal/rules asserts, so the comparison is between the shape feno
+// ships and the reference shape rather than between two things and a third.
+//
+// Both are run over the same history, which is a series where one of the three
+// days ran high over the hours the band reads from. Combining folds that day
+// into one centre and one scale, so the scale absorbs it and the band grows
+// wide enough to hide a real spike. The envelope keeps the day separate: two
+// tight bands and one high one, and a spike above all three still breaches.
+// The result is in testdata/golden.
 //
 // The envelope is built here rather than in the package because it is a
 // measurement and not a feature. Nothing in feno emits or evaluates an
 // envelope today, and adding a second band shape to the production path to
 // answer a question about which shape to keep is how a tool ends up carrying
 // both forever.
-func TestPooledVersusEnvelope(t *testing.T) {
+func TestCombinedVersusEnvelope(t *testing.T) {
 	d := load(t, "daily-seasonal.yaml")
 	w := window(t, d)
 	result := history(t, "seasonal-shape.json", w)
@@ -46,7 +51,7 @@ func TestPooledVersusEnvelope(t *testing.T) {
 		t.Fatalf("band: %v", err)
 	}
 	if len(band.Offsets) != 3 {
-		t.Fatalf("the band pools %d offsets, want 3", len(band.Offsets))
+		t.Fatalf("the band reads %d offsets, want 3", len(band.Offsets))
 	}
 	if len(result.Series) != 1 {
 		t.Fatalf("the fixture holds %d series, want 1", len(result.Series))
@@ -54,9 +59,9 @@ func TestPooledVersusEnvelope(t *testing.T) {
 	points := result.Series[0].Points
 	instants := detect.Range{Start: w.Start, End: w.End, Step: w.Step}
 
-	pooled, err := detect.Evaluate(band, instants, points)
+	combined, err := detect.Evaluate(band, instants, points)
 	if err != nil {
-		t.Fatalf("pooled: %v", err)
+		t.Fatalf("combined: %v", err)
 	}
 	envelope, bands, err := evaluateEnvelope(band, instants, points)
 	if err != nil {
@@ -77,7 +82,7 @@ func TestPooledVersusEnvelope(t *testing.T) {
 		label   string
 		results []detect.Result
 	}{
-		{"pooled", pooled},
+		{"combined", combined},
 		{"envelope", envelope},
 	}
 	fmt.Fprintf(&out, "%-24s%10s%10s\n", "", rows[0].label, rows[1].label)
@@ -115,15 +120,15 @@ func TestPooledVersusEnvelope(t *testing.T) {
 
 	// The instant the two disagree about, spelled out, because the numbers
 	// above say that they differ and not why.
-	at, ok := disagreement(pooled, envelope)
+	at, ok := disagreement(combined, envelope)
 	if !ok {
 		t.Fatal("the two forms agree at every instant, so this fixture no longer measures anything")
 	}
 	fmt.Fprintf(&out, "\nthe first instant they disagree about, %s, sample %s\n",
-		instant(pooled[at].At), number(pooled[at].Value))
-	fmt.Fprintf(&out, "  pooled    [%s, %s]  centre %s, scale %s, breaching %v\n",
-		number(pooled[at].Band.Lower()), number(pooled[at].Band.Upper()),
-		number(pooled[at].Band.Centre), number(pooled[at].Band.Scale), pooled[at].Breaching)
+		instant(combined[at].At), number(combined[at].Value))
+	fmt.Fprintf(&out, "  combined  [%s, %s]  centre %s, scale %s, breaching %v\n",
+		number(combined[at].Band.Lower()), number(combined[at].Band.Upper()),
+		number(combined[at].Band.Centre), number(combined[at].Band.Scale), combined[at].Breaching)
 	fmt.Fprintf(&out, "  envelope  [%s, %s]  breaching %v, from\n",
 		number(envelope[at].Band.Lower()), number(envelope[at].Band.Upper()), envelope[at].Breaching)
 	for i, offset := range band.Offsets {
@@ -133,14 +138,16 @@ func TestPooledVersusEnvelope(t *testing.T) {
 			number(b.Centre), number(b.Scale))
 	}
 
-	out.WriteString("\nPooling spreads one unusual day across the scale, which widens the band\n")
-	out.WriteString("far enough to swallow the spike. The envelope keeps the day in its own\n")
-	out.WriteString("band, so the spike is still outside all three. This is one fixture and\n")
-	out.WriteString("one shape of history, so it is evidence and not a decision: it says the\n")
-	out.WriteString("two forms differ on the case seasonality exists for, which is more than\n")
-	out.WriteString("was known before there was a backtest to run them through.\n")
+	out.WriteString("\nOne band spreads an unusual day across the scale, which widens it far\n")
+	out.WriteString("enough to swallow the spike. The envelope keeps the day in its own\n")
+	out.WriteString("band, so the spike is still outside all three. The combined column is\n")
+	out.WriteString("the arithmetic the generated rule performs, so this compares what feno\n")
+	out.WriteString("ships against the reference shape. It is one fixture and one shape of\n")
+	out.WriteString("history, so it is evidence and not a decision: it says the two forms\n")
+	out.WriteString("differ on the case seasonality exists for, which is more than was\n")
+	out.WriteString("known before there was a backtest to run them through.\n")
 
-	golden(t, "pooled-vs-envelope.txt", out.Bytes())
+	golden(t, "combined-vs-envelope.txt", out.Bytes())
 }
 
 // evaluateEnvelope evaluates one band per offset and takes the widest, which
@@ -151,15 +158,15 @@ func TestPooledVersusEnvelope(t *testing.T) {
 // three seasonal baselines is not the same judgement, and treating it as one
 // would flatter whichever form had the more missing history.
 func evaluateEnvelope(
-	pooledSpec detect.Spec, r detect.Range, points []prometheus.Point,
+	combinedSpec detect.Spec, r detect.Range, points []prometheus.Point,
 ) ([]detect.Result, [][]detect.Band, error) {
-	if len(pooledSpec.Offsets) == 0 {
-		return nil, nil, fmt.Errorf("the band pools no offsets, so there is no envelope to take")
+	if len(combinedSpec.Offsets) == 0 {
+		return nil, nil, fmt.Errorf("the band reads no offsets, so there is no envelope to take")
 	}
 
-	perOffset := make([][]detect.Result, 0, len(pooledSpec.Offsets))
-	for _, offset := range pooledSpec.Offsets {
-		spec := pooledSpec
+	perOffset := make([][]detect.Result, 0, len(combinedSpec.Offsets))
+	for _, offset := range combinedSpec.Offsets {
+		spec := combinedSpec
 		spec.Offsets = []time.Duration{offset}
 		results, err := detect.Evaluate(spec, r, points)
 		if err != nil {

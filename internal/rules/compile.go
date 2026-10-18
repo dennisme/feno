@@ -94,13 +94,7 @@ var metricNameChars = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // compile turns one detector into its group.
 func compile(
 	target Target, name string, d spec.Detector, band detect.Spec, query string, step time.Duration,
-) (group, *Degradation, error) {
-	if band.Strategy == detect.Robust && len(band.Offsets) > 1 {
-		return group{}, nil, fmt.Errorf(
-			"detector %q: %s over %d pooled windows: a median of a pool is not a function of the per-window medians: %w",
-			d.Metadata.Name, detect.RequireSeasonalDecomposition, len(band.Offsets), ErrUnsupported)
-	}
-
+) (group, *Degradation) {
 	var (
 		g        = group{Name: "anomaly-" + name, Interval: promDuration(step)}
 		series   = func(suffix string) string { return "anomaly:" + name + ":" + suffix }
@@ -110,8 +104,8 @@ func compile(
 
 	g.Rules = append(g.Rules, rule{Record: level, Expr: Expression(query)})
 
-	centre, scale, pooled := statistics(target, series, level, band)
-	g.Rules = append(g.Rules, pooled...)
+	centre, scale, perWindow := statistics(target, series, level, band)
+	g.Rules = append(g.Rules, perWindow...)
 	g.Rules = append(g.Rules,
 		rule{Record: series("centre"), Expr: Expression(centre)},
 		rule{Record: series("scale"), Expr: Expression(scale)},
@@ -136,20 +130,20 @@ func compile(
 	)
 
 	g.Rules = append(g.Rules, alert(d, level, series))
-	return g, degraded, nil
+	return g, degraded
 }
 
 // statistics returns the centre and scale expressions, plus any recording
 // rules they reference.
 //
-// One window compiles to the obvious thing. More than one needs the pooled
-// mean and variance written out, which is why each window's mean and
-// variance become recorded series: the scale expression reads every mean
-// twice, once for the pooled mean and once for its deviation from it, and
-// recomputing a window pass per reference costs more than a stored series.
+// One window compiles to the obvious thing. More than one has to be combined
+// window by window, which is why each window's mean and variance become
+// recorded series: the scale expression reads every mean twice, once for the
+// centre and once for its deviation from it, and recomputing a window pass
+// per reference costs more than a stored series.
 func statistics(
 	target Target, series func(string) string, level string, band detect.Spec,
-) (centre, scale string, pooled []rule) {
+) (centre, scale string, perWindow []rule) {
 	windows := band.Offsets
 	if len(windows) == 0 {
 		windows = []time.Duration{0}
@@ -171,7 +165,7 @@ func statistics(
 		sel := selector(level, band.Window, offset)
 		tag := promDuration(offset)
 		mean, variance := series("mean_"+tag), series("var_"+tag)
-		pooled = append(pooled,
+		perWindow = append(perWindow,
 			rule{Record: mean, Expr: Expression(fmt.Sprintf("avg_over_time(%s)", sel))},
 			rule{Record: variance, Expr: Expression(fmt.Sprintf("stddev_over_time(%s) ^ 2", sel))},
 		)
@@ -182,17 +176,18 @@ func statistics(
 	n := number(float64(len(windows)))
 	centre = fmt.Sprintf("(%s) / %s", strings.Join(means, " + "), n)
 
-	// The pooled population variance of equal-length windows is the mean of
-	// their variances plus the variance of their means, which is what makes
-	// this the same number internal/detect computes over the pool rather
-	// than an approximation of it.
+	// Every window weighs the same, whatever it holds: the mean of the
+	// per-window means, and the square root of the mean of their variances
+	// plus the variance of those means. internal/detect combines its
+	// windows the same way, so the two are the same arithmetic rather than
+	// the same number under a condition on the data. See detect.Spec.band.
 	spread := make([]string, 0, len(means))
 	for _, mean := range means {
 		spread = append(spread, fmt.Sprintf("(%s - %s) ^ 2", mean, series("centre")))
 	}
 	scale = fmt.Sprintf("sqrt(((%s) / %s) + ((%s) / %s))",
 		strings.Join(variances, " + "), n, strings.Join(spread, " + "), n)
-	return centre, scale, pooled
+	return centre, scale, perWindow
 }
 
 // robustScale is the median absolute deviation where the server has it and

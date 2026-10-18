@@ -14,6 +14,10 @@
 #   width
 # seasonality daily: autocorrelation of the median series, daily at 0.78, over
 #   the 0.50 threshold; no weekly shape, 0.21 against the 0.50 threshold
+# strategy adaptive after all: the scales above asked for robust, but a seasonal
+#   band takes a mean and a variance per offset window and no combination of
+#   per-window medians is a median. Delete the seasonality above to draft robust
+#   instead, and the band then reads one window ending at the instant
 # sensitivity balanced: not profiled. How many units of scale is a policy about
 #   who gets paged, not a property of the series
 # coverage 99.5%: the median of 1 series over 6049 instants, measured at the
@@ -45,7 +49,7 @@ spec:
           spec:
             query: sum(rate(http_requests_total{service="checkout"}[5m]))
   detection:
-    strategy: robust
+    strategy: adaptive
     sensitivity: balanced
     seasonality:
       - daily

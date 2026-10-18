@@ -153,7 +153,7 @@ func TestNewWindow(t *testing.T) {
 // out by hand from the band the detector compiles to.
 //
 // Every case reads the same twenty-five hour grid at a one hour step. The
-// seasonal detector pools three six hour windows at a day, two days and three
+// seasonal detector reads three six hour windows at a day, two days and three
 // days back, which on a series alternating one either side of a hundred is a
 // centre of 100 and a scale of 1, so a balanced band is [97, 103] and a sample
 // of 140 breaches it.

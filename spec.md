@@ -741,7 +741,7 @@ So the strategy matrix inverts. The `robust` strategy is the awkward one on Prom
 
 1. **`detect/` must be an IR, not PromQL string templates.** Band math expressed once as a structured representation, compiled per dialect: PromQL, MetricsQL, SQL. This is the strongest argument yet for that shape, and it is a decision that is cheap now and expensive after the first release.
 2. **A ClickHouse target has three emit artifacts, not one:** refreshable MV DDL for the baselines, a Prometheus-format rule file whose `expr` is SQL, and optionally plain PromQL for anyone running `TimeSeries` tables. `anomaly generate -t clickhouse` emits the first two together, since the rule is meaningless without the MV.
-3. **Strategy support becomes per-target and must be declared.** A spec asking for `robust` with multi-week seasonality compiles cleanly to ClickHouse and degrades on Prometheus. `generate` should say so out loud rather than silently emitting an approximation.
+3. **Strategy support becomes per-target and must be declared.** A spec asking for `robust` with multi-week seasonality compiles cleanly to ClickHouse and degrades on Prometheus. `generate` should say so out loud rather than silently emitting an approximation. Corrected by Part 13: that combination is refused for every target, because the band itself is defined per window.
 4. **`backtest` is dramatically better here.** On Prometheus, a 30-day backtest means pulling millions of samples over HTTP and evaluating locally. On ClickHouse it is one query with window functions, evaluated server side, with `seriesDecomposeSTL` doing the seasonal work in the database. The mode that is slowest on Prometheus is fastest on ClickHouse, which makes ClickHouse users the best early adopters to court.
 
 ### Sources, Part 7
@@ -873,7 +873,7 @@ Three further advantages:
 ### Two mitigations, both from the first commit
 
 1. **Per-target capability declaration.** `generate` states when a spec degrades on the chosen target instead of silently emitting an approximation. This has to exist before there is a second target, or it will never be retrofitted honestly.
-2. **At least one deliberately uncompilable fixture.** A spec requesting `robust` with multi-week seasonality should warn or fail on the Prometheus target. The degradation path needs exercising while Prometheus is the only target, not discovered when ClickHouse lands.
+2. **At least one deliberately uncompilable fixture.** A spec requesting `robust` with multi-week seasonality should warn or fail on the Prometheus target. The degradation path needs exercising while Prometheus is the only target, not discovered when ClickHouse lands. It fails, and Part 13 says where the refusal lives.
 
 ### clickhouse-ruler prerequisites for the second target
 
@@ -1423,3 +1423,60 @@ total one, `just backtest-history` runs the burn signal as an SLO ratio over
 the pair, and the integration test asserts the grid rather than a number of
 episodes: every reported instant carried a burn value, and some of them were
 burning.
+
+## Part 13: One band, equal weight per window
+
+Decided 2026-10-18. This part corrects Part 7 and Part 9.
+
+A seasonal band reads one window per offset. Until now the Go implementation
+gathered every sample from every window into one set and took one mean and one
+standard deviation over it, where the compiled rule records a mean and a
+variance per offset and averages them, because PromQL has no union of range
+selectors. Those are the same number only while every window holds the same
+count, so an ordinary scrape gap made the backtest and the rule it predicts
+disagree: measured at 157.35 against 157.33 for a centre, and 121.00 against
+117.59 for a scale, on one window five samples deep instead of six
+(`dennisme/feno#28`).
+
+### 1. The band weighs every window equally
+
+The centre is the mean of the per-window means, and the scale is the square
+root of the mean of the per-window variances plus the variance of those means.
+Both implementations now compute that, so they are the same arithmetic rather
+than the same number under a condition on the data.
+
+The alternative was to count-weight the rule instead, which is the other way
+to make the two agree. It needs a `count_over_time` recording rule per offset
+on top of the mean and the variance each one already records, and a daily and
+weekly band already writes nineteen rules against the six to ten Part 4
+budgets a band at. Equal weight costs nothing and says something an author can
+read: a thin window still describes its own period.
+
+### 2. `robust` with seasonality is refused everywhere, not degraded
+
+Part 7 said that combination compiles cleanly to ClickHouse and degrades on
+Prometheus, and Part 9 asked for it as the deliberately uncompilable fixture.
+The first half is withdrawn. A median is not a function of the per-window
+medians, so a band that combines its windows by their means and spreads has no
+robust form at all, whatever dialect it is written in. The refusal therefore
+belongs to the representation, in `detect.Spec.Validate`, rather than to the
+Prometheus compiler: a backtest of a band no target can evaluate predicts
+nothing, and failing is the honest answer. `feno generate` and `feno backtest`
+both exit 2 and name the detector.
+
+`feno suggest` resolves the same conflict in the draft rather than leaving it
+for the author: a series spiky enough to ask for `robust` that also repeats
+is drafted `adaptive` with its measured seasonality, and the evidence block
+says the scales asked for `robust` and what deleting the seasonality would
+get.
+
+### What proves equal weight
+
+`internal/rules/evaluated_test.go` carries the thin window as a parity case
+with no skip. One offset window is a sample short of the others, promtool
+evaluates the real rule chain over the same series, and the centre, the scale
+and both edges match `internal/detect` at every instant. The empty-window case
+beside it still asserts both forms refusing, which is the per-window coverage
+floor from Part 12's era. `internal/backtest`'s comparison against the Grafana
+reference envelope now names its first column `combined`, because that column
+is what the generated rule computes.

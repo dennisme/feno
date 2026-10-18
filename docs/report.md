@@ -55,7 +55,7 @@ weeks on flat demo traffic is what an over-tuned detector looks like.
 
 The first line is the band, in the terms the document wrote it in, so a
 report pasted into a ticket says which band produced it. A seasonal band also
-says how many offsets it pooled, and the sample count it prints says `per
+says how many offsets it read, and the sample count it prints says `per
 window`, because that is the window the floor applies to.
 
 | Line | What it says |

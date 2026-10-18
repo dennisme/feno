@@ -190,6 +190,44 @@ func TestDecideSeasonality(t *testing.T) {
 	}
 }
 
+// TestDecideKeepsSeasonalityOverRobust is the one place two decisions
+// conflict. A spiky series drafts `robust` and a repeating one drafts
+// seasonality, and a band cannot be both: a median is not a function of the
+// per-window medians, so [detect.Spec.Validate] refuses the combination and
+// a drafted document holding it would fail `feno generate`.
+//
+// The measured shape wins, because the shape is a property of the series and
+// the strategy is a choice about width. The evidence has to say so, since an
+// author reading `adaptive` on a spiky series would otherwise think the
+// profile had missed the spikes.
+func TestDecideKeepsSeasonalityOverRobust(t *testing.T) {
+	series := fit()
+	series.StdDev, series.RobustScale = 80, 10
+	series.Autocorrelation = map[time.Duration]float64{day: 0.8, week: 0.2}
+
+	decision, err := Decide(profiled("up", series))
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if decision.Strategy != detect.Adaptive {
+		t.Errorf("strategy = %q, want %q", decision.Strategy, detect.Adaptive)
+	}
+	if !slices.Equal(decision.Seasonality, []spec.Seasonality{spec.Daily}) {
+		t.Errorf("seasonality = %v, want daily", decision.Seasonality)
+	}
+
+	var said bool
+	for _, evidence := range decision.Evidence {
+		if strings.Contains(evidence, string(detect.Robust)) &&
+			strings.Contains(evidence, "seasonal") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("no evidence says why the spiky series is not robust: %v", decision.Evidence)
+	}
+}
+
 func TestDecideSensitivityIsNotProfiled(t *testing.T) {
 	decision, err := Decide(profiled("up", fit()))
 	if err != nil {

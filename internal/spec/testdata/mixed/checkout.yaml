@@ -37,7 +37,7 @@ spec:
               # the line above is inside a block scalar and is not a
               # document separator. The splitter has to agree.
   detection:
-    strategy: robust
+    strategy: adaptive
     seasonality:
       - daily
       - weekly
