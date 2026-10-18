@@ -113,7 +113,7 @@ The band, in the terms you write rather than the terms it is computed in.
 | `class` | required | `requests`, `latency`, `errors` or `saturation`: what kind of signal this is |
 | `window` | `1h` | How much history one band is computed over |
 | `minWidth` | `0`, no floor | A floor on the band's full width, in the series' own units |
-| `minCoverage` | `0.75` | The fraction of a full window that must hold samples before a band is computed at all |
+| `minCoverage` | `0.75` | The fraction of a full window that must hold samples before a band is computed at all, required of every window a seasonal band pools |
 
 ### strategy and robustScale
 
@@ -226,6 +226,14 @@ sample count on purpose: the count depends on the step, the step differs
 between a backtest and a ruler for the same detector, and you cannot be asked
 to track it. feno turns the fraction into a count from whatever step is about
 to be used, with a floor of two samples.
+
+A band with `seasonality` set asks it of every window it pools, not of the
+pool. One empty offset window gets no verdict even when the other two hold a
+full window each, which is what the generated rule does: it reads each offset
+with its own range selector, and one over an empty range returns nothing, so
+the whole chain drops the series. A fraction of the pool would let feno
+report breaches in a backtest that the rule on the server could never
+produce.
 
 Three quarters is a judgement, so it is worth saying which way each direction
 is wrong. Too high and an ordinary scrape gap or a rolling restart turns

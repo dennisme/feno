@@ -96,10 +96,10 @@ func Evaluate(spec Spec, r Range, points []prometheus.Point) ([]Result, error) {
 
 		result := Result{Sample: episode.Sample{At: t}, Value: value}
 
-		switch pool, finite := spec.pool(points, t); {
-		case !finite:
+		switch pool, state := spec.pool(points, t); state {
+		case poolUndefined:
 			result.Status = Undefined
-		case len(pool) < spec.MinSamples:
+		case poolShort:
 			result.Status = Cold
 		default:
 			result.Status = Evaluated
@@ -130,24 +130,58 @@ func Samples(results []Result) []episode.Sample {
 	return out
 }
 
-// pool gathers the samples behind the band at t, one window per offset.
+// poolState is why there is or is not a pool to compute a band from.
+type poolState int
+
+const (
+	// poolReady is every window holding enough finite samples.
+	poolReady poolState = iota
+
+	// poolShort is a window under [Spec.MinSamples].
+	poolShort
+
+	// poolUndefined is a sample that is a NaN or an infinity.
+	poolUndefined
+)
+
+// pool gathers the samples behind the band at t, one window per offset, and
+// reports whether they amount to a band.
 //
-// finite is false when any of them is a NaN or an infinity, which makes the
-// band undefined rather than merely wide. Pooling is what makes a seasonal
-// band one band: the samples from the same hour of each of the last four
-// weeks describe one expected level together, and averaging four separate
-// bands afterwards would not be the same number.
-func (s Spec) pool(points []prometheus.Point, t time.Time) ([]float64, bool) {
+// Pooling is what makes a seasonal band one band: the samples from the same
+// hour of each of the last three weeks describe one expected level together,
+// and averaging three separate bands afterwards would not be the same
+// number.
+//
+// # Why the floor is checked per window and not on the pool
+//
+// [Spec.MinSamples] is a floor each window clears on its own, so one empty
+// offset window withholds the band however much history the others hold.
+// The reason is the rule the band compiles to: a per-offset `avg_over_time`
+// over an empty range returns no sample, so the whole chain drops the series
+// and the rule reports nothing. A pooled floor would let twelve samples from
+// two full windows clear a floor of nine while the third window held
+// nothing, and the backtest would then report pages the rule could never
+// produce.
+//
+// It also bounds how far the two forms can drift where both do report a
+// band. The pooled mean and the mean of the per-offset means are equal only
+// for equal-length windows, and a floor per window is a floor on how unequal
+// those lengths get.
+func (s Spec) pool(points []prometheus.Point, t time.Time) ([]float64, poolState) {
 	var out []float64
 	for _, offset := range s.offsets() {
-		for _, p := range window(points, t.Add(-offset), s.Window) {
+		samples := window(points, t.Add(-offset), s.Window)
+		if len(samples) < s.MinSamples {
+			return nil, poolShort
+		}
+		for _, p := range samples {
 			if math.IsNaN(p.Value) || math.IsInf(p.Value, 0) {
-				return nil, false
+				return nil, poolUndefined
 			}
 			out = append(out, p.Value)
 		}
 	}
-	return out, true
+	return out, poolReady
 }
 
 // window returns the points a range selector of width w ending at end would

@@ -1,5 +1,5 @@
 {
-  "comment": "The series does not begin until twenty hours into the read span, so the first reported instants have a pooled window the coverage policy refuses. A backtest that called those quiet would be reporting an empty week as a clean one.",
+  "comment": "The series does not begin until twenty hours into the read span, so the window the first reported instants take three days back holds less than the coverage policy demands of each one. A backtest that called those quiet would be reporting an empty week as a clean one.",
   "start": "2026-09-01T00:00:00Z",
   "step": "1h",
   "series": [

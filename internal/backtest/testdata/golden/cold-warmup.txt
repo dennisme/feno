@@ -1,4 +1,4 @@
-checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 samples minimum
+checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 5 samples minimum per window
   query                 sum(rate(http_requests_total{service="checkout"}[5m])) by (instance)
   step                  1h, for 2h
   requires              seasonal decomposition
@@ -11,12 +11,12 @@ checkout-request-rate  adaptive, balanced, window 6h, 3 pooled offsets, 14 sampl
   paged wall clock      0s  (0.00% of the reported window)
   peak concurrent       nothing fired
   longest episode       none
-  without a verdict     15 of 25 series-instants: 15 cold, 0 absent, 0 undefined
+  without a verdict     18 of 25 series-instants: 18 cold, 0 absent, 0 undefined
   budget overlap        no linked SLO: set spec.sloRef to the SLO this detector
                         protects, or delete a detector nobody can tie to a burn
 
   series              firing  flaps  firing time  ratio  cold  absent  undefined
-  {instance="web-1"}  0       0      0s           0.00%  15    0       0
+  {instance="web-1"}  0       0      0s           0.00%  18    0       0
 
   Every ratio above divides by the reported window. Dividing by the span
   the samples cover, or by the window times the series count, reads lower

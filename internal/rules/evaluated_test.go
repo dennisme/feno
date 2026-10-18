@@ -55,11 +55,22 @@ const paritySeries = "band_input"
 // # Where that condition fails
 //
 // Equal-length is a condition on the data, not a property of the band. The
-// last two cases hold a gap in one offset window and only one, so each
-// names its own cause: one window thinner than the others, and one window
-// holding nothing. The two bands disagree in both, so both are skipped and
-// point at dennisme/feno#28, which carries the measured numbers. Asserting
-// the disagreement would make a test of whichever side is wrong.
+// last two cases hold a gap in one offset window and only one, so each names
+// its own cause: one window thinner than the others, and one window holding
+// nothing.
+//
+// The empty one agrees, and the agreement is both sides refusing. The
+// coverage floor is a count each window clears on its own, so a window
+// holding nothing withholds the band in Go, and a per-offset `avg_over_time`
+// over an empty range returns no sample, so the rule chain drops the series.
+// The case asserts the absence at every instant.
+//
+// The thin one still disagrees and is skipped, pointing at dennisme/feno#28,
+// which carries the measured numbers. A per-window floor bounds that
+// disagreement rather than removing it: a window five samples of six deep
+// clears the floor and is still not the same length as a full one.
+// Asserting the current numbers would make a test of whichever side is
+// wrong.
 func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 	promtool, err := exec.LookPath("promtool")
 	if err != nil {
@@ -91,6 +102,11 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 		// than sample indices so that a case can say which offset window
 		// they land in.
 		gaps []time.Duration
+
+		// cold is a case where every instant asserted has one offset window
+		// holding nothing, so neither side reports a band and the
+		// expectation is the absence of one.
+		cold bool
 
 		// finding is a disagreement that has been measured and reported.
 		// The case is skipped rather than asserted, because an assertion on
@@ -170,22 +186,27 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			span:   time.Hour,
 		},
 		{
-			// One offset window three samples short of the six each of the
+			// One offset window one sample short of the six each of the
 			// others holds, with the gap in the window taken 48h back and
-			// nowhere else.
+			// nowhere else. One short of six is as thin as a window gets
+			// while still clearing the coverage floor, which is five of six
+			// here: anything thinner and both sides refuse, which is the
+			// case below.
 			//
-			// internal/detect pools all fifteen samples and takes one mean
-			// over them, so the thin window carries three fifteenths of the
+			// internal/detect pools all seventeen samples and takes one mean
+			// over them, so the thin window carries five seventeenths of the
 			// centre. The compiled rule averages the three per-offset means
 			// with equal weight, so it carries a third. Those are the same
 			// number only for equal-length windows, which is the condition
 			// the parity cases above all satisfy.
 			//
-			// At the instant asserted the centre is 157.8 pooled against
-			// 158 equally weighted, and the scale 128.80848833313226
-			// against 117.58684733704985. The scale is the further out of
-			// the two, because the pooled variance identity rests on the
-			// same equal-length condition as the mean.
+			// At the instant asserted the centre is 157.35294117647058
+			// pooled against 157.33333333333334 equally weighted, and the
+			// scale 120.99535293773043 against 117.58684733704985. The scale
+			// is the further out of the two, because the pooled variance
+			// identity rests on the same equal-length condition as the mean.
+			// The floor bounds the gap rather than closing it: a window may
+			// still be a sixth short of its neighbours.
 			name: "adaptive pooled over three days with a thin window",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
@@ -196,27 +217,27 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			step:   10 * time.Minute,
 			window: time.Hour,
 			gaps: []time.Duration{
-				24*time.Hour + 10*time.Minute,
-				24*time.Hour + 20*time.Minute,
-				24*time.Hour + 30*time.Minute,
+				25 * time.Hour,
 			},
 			finding: "a thin offset window weights the two bands differently: dennisme/feno#28",
 		},
 		{
-			// The same window holding nothing at all, which fails
-			// differently: avg_over_time over an empty range returns no
-			// sample, so the centre and the scale expressions drop the
-			// series and the rule has no band, while internal/detect still
-			// has twelve samples from the other two windows and reports one.
-			// At the instant asserted that band has a centre of 157.5 and a
-			// scale of 144.01012695872006, and the rule has nothing at all.
+			// The same window holding nothing at all, which both sides
+			// refuse. avg_over_time over an empty range returns no sample,
+			// so the centre and the scale expressions drop the series and
+			// the rule has no band to compare against; the coverage floor
+			// is per window, so a window holding none of its six samples is
+			// under it however much history the other two offsets carry.
 			//
-			// The coverage floor is loosened because the default would stop
-			// internal/detect too. Twelve of eighteen samples is two thirds,
-			// under DefaultMinCoverage, so at the default both sides agree
-			// by refusing. An author who writes `minCoverage: 0.5` is asking
-			// for a band from two thirds of a pool and gets one from Go and
-			// none from the server.
+			// `minCoverage: 0.5` is what makes that the thing asserted. At
+			// three samples of six per window the two full offsets clear
+			// the floor several times over, so the refusal here is the
+			// empty window and not a thin pool.
+			//
+			// The gaps run from the first instant the 48h window covers at
+			// the start of the asserted span to the last one it covers at
+			// the end, so every instant asserted here is the same case
+			// rather than only the first.
 			name: "adaptive pooled over three days with an empty window",
 			band: spec.Detection{
 				Strategy:    detect.Adaptive,
@@ -227,6 +248,8 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			},
 			step:   10 * time.Minute,
 			window: time.Hour,
+			span:   time.Hour,
+			cold:   true,
 			gaps: []time.Duration{
 				24*time.Hour + 10*time.Minute,
 				24*time.Hour + 20*time.Minute,
@@ -234,8 +257,13 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 				24*time.Hour + 40*time.Minute,
 				24*time.Hour + 50*time.Minute,
 				25 * time.Hour,
+				25*time.Hour + 10*time.Minute,
+				25*time.Hour + 20*time.Minute,
+				25*time.Hour + 30*time.Minute,
+				25*time.Hour + 40*time.Minute,
+				25*time.Hour + 50*time.Minute,
+				26 * time.Hour,
 			},
-			finding: "an empty offset window leaves the rule with no band and internal/detect with one: dennisme/feno#28",
 		},
 	}
 
@@ -300,10 +328,14 @@ func TestEmittedBandMatchesEvaluatedBand(t *testing.T) {
 			if len(results) == 0 {
 				t.Fatal("no instants to compare")
 			}
+			want := detect.Evaluated
+			if tt.cold {
+				want = detect.Cold
+			}
 			for _, result := range results {
-				if result.Status != detect.Evaluated {
-					t.Fatalf("status %q at %s, want a band: the input series is too short",
-						result.Status, result.At.Sub(epoch(0)))
+				if result.Status != want {
+					t.Fatalf("status %q at %s, want %q: the input series is not the case this asserts",
+						result.Status, result.At.Sub(epoch(0)), want)
 				}
 			}
 
@@ -418,6 +450,11 @@ func parityDetector(detection spec.Detection) spec.Detector {
 // either implementation's, which is the second implementation this test
 // exists to avoid. What those series add up to is the centre and the scale,
 // and both are asserted at every instant.
+//
+// An instant internal/detect reports no band at is asserted as an empty
+// expectation, which is what a rule whose range selector found nothing
+// leaves behind. A band and no band are the same disagreement either way
+// round, so the absence is asserted rather than skipped over.
 func unitTest(ruleFile, input string, step time.Duration, results []detect.Result) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "rule_files:\n  - %s\n\n", ruleFile)
@@ -440,6 +477,10 @@ func unitTest(ruleFile, input string, step time.Duration, results []detect.Resul
 		} {
 			fmt.Fprintf(&b, "      - expr: %s\n", assertion.expr)
 			fmt.Fprintf(&b, "        eval_time: %s\n", promDuration(at))
+			if result.Status != detect.Evaluated {
+				b.WriteString("        exp_samples: []\n")
+				continue
+			}
 			b.WriteString("        exp_samples:\n")
 			fmt.Fprintf(&b, "          - labels: '%s'\n", assertion.expr)
 			fmt.Fprintf(&b, "            value: %s\n", strconv.FormatFloat(assertion.value, 'g', -1, 64))
